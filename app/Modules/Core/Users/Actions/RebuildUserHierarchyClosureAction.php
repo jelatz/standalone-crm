@@ -15,12 +15,23 @@ class RebuildUserHierarchyClosureAction
 
     public function execute(User $user): void
     {
-        /** @var list<string> $affectedUserIds */
-        $affectedUserIds = [];
+        DB::transaction(function () use ($user): void {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::statement("SELECT pg_advisory_xact_lock(hashtext('user_hierarchy_closures'))");
+            }
 
-        DB::transaction(function () use ($user, &$affectedUserIds): void {
             $userId = (string) $user->id;
-            $newManagerId = $user->manager_id !== null ? (string) $user->manager_id : null;
+
+            if ($user->exists && ! $user->isDirty('manager_id')) {
+                $persistedManagerId = DB::table('users')
+                    ->where('id', $userId)
+                    ->value('manager_id');
+                $newManagerId = $persistedManagerId !== null ? (string) $persistedManagerId : null;
+                $user->setAttribute('manager_id', $newManagerId);
+                $user->syncOriginalAttribute('manager_id');
+            } else {
+                $newManagerId = $user->manager_id !== null ? (string) $user->manager_id : null;
+            }
 
             $this->assertNoCycle($userId, $newManagerId);
 
@@ -105,9 +116,11 @@ class RebuildUserHierarchyClosureAction
                 ...$oldAncestorIds,
                 ...$newAncestorIds,
             ]));
-        });
 
-        $this->visibleScopeResolver->invalidateForUsers($affectedUserIds);
+            DB::afterCommit(function () use ($affectedUserIds): void {
+                $this->visibleScopeResolver->invalidateForUsers($affectedUserIds);
+            });
+        });
     }
 
     protected function assertNoCycle(string $userId, ?string $newManagerId): void

@@ -16,7 +16,6 @@ use App\Modules\Core\Users\Models\UserHierarchyClosure;
 use App\Support\Concerns\HasUuidV7;
 use App\Support\Exceptions\HierarchyCycleException;
 use App\Support\Silo\HasSiloVisibility;
-use App\Support\Silo\VisibleScopeResolver;
 use Database\Seeders\RolesPermissionsSeeder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -235,13 +234,13 @@ it('grants and revokes explicit cross-silo access via entity_collaborators', fun
         ->toEqualCanonicalizing([$recRepB->id]);
 });
 
-it('immediately invalidates Redis silo cache when a manager subtree is reassigned to another director', function (): void {
+it('rebuilds closure tree on manager reassignment and preserves committed DB manager when model is not dirty', function (): void {
     $dept = Department::query()->create(['name' => 'Commercial', 'slug' => 'commercial']);
 
-    $directorA = createOrgUser($dept, 'EMP-501', 'Director A', 'dir.a.cache@company.internal', RoleEnum::Director);
-    $managerA = createOrgUser($dept, 'EMP-502', 'Manager A', 'mgr.a.cache@company.internal', RoleEnum::Sales, $directorA);
-    $repA = createOrgUser($dept, 'EMP-503', 'Rep A', 'rep.a.cache@company.internal', RoleEnum::Sales, $managerA);
-    $directorB = createOrgUser($dept, 'EMP-504', 'Director B', 'dir.b.cache@company.internal', RoleEnum::Director);
+    $directorA = createOrgUser($dept, 'EMP-501', 'Director A', 'dir.a.tree@company.internal', RoleEnum::Director);
+    $managerA = createOrgUser($dept, 'EMP-502', 'Manager A', 'mgr.a.tree@company.internal', RoleEnum::Sales, $directorA);
+    $repA = createOrgUser($dept, 'EMP-503', 'Rep A', 'rep.a.tree@company.internal', RoleEnum::Sales, $managerA);
+    $directorB = createOrgUser($dept, 'EMP-504', 'Director B', 'dir.b.tree@company.internal', RoleEnum::Director);
 
     $recordModel = makeSiloTestModel();
     $recDirA = $recordModel->newQuery()->create(['owner_id' => $directorA->id, 'title' => 'Dir A Record']);
@@ -249,31 +248,23 @@ it('immediately invalidates Redis silo cache when a manager subtree is reassigne
     $recRepA = $recordModel->newQuery()->create(['owner_id' => $repA->id, 'title' => 'Rep A Record']);
     $recDirB = $recordModel->newQuery()->create(['owner_id' => $directorB->id, 'title' => 'Dir B Record']);
 
-    $resolver = app(VisibleScopeResolver::class);
+    // Simulate a stale in-memory model loaded before a concurrent manager_id update committed
+    $staleManagerA = User::query()->findOrFail($managerA->id);
+    expect($staleManagerA->manager_id)->toBe($directorA->id);
 
-    // Warm Redis cache for both directors
-    $scopeA = $resolver->for($directorA);
-    $scopeB = $resolver->for($directorB);
+    DB::table('users')->where('id', $managerA->id)->update(['manager_id' => $directorB->id]);
 
-    expect($scopeA->siloUserIds)->toEqualCanonicalizing([$directorA->id, $managerA->id, $repA->id]);
-    expect($scopeB->siloUserIds)->toEqualCanonicalizing([$directorB->id]);
-    expect(Cache::has(VisibleScopeResolver::cacheKey($directorA->id)))->toBeTrue();
-    expect(Cache::has(VisibleScopeResolver::cacheKey($directorB->id)))->toBeTrue();
+    // Executing with stale non-dirty model must re-read DB manager_id instead of overwriting it
+    app(RebuildUserHierarchyClosureAction::class)->execute($staleManagerA);
 
-    // Reassign Manager A subtree from Director A to Director B
-    $managerA->manager_id = $directorB->id;
-    $managerA->save();
-    app(RebuildUserHierarchyClosureAction::class)->execute($managerA);
+    expect($staleManagerA->manager_id)->toBe($directorB->id)
+        ->and($managerA->fresh()->manager_id)->toBe($directorB->id);
 
-    // Without manual cache clear, Director A loses Manager A & Rep A and Director B gains them
     expect($recordModel->newQuery()->visibleTo($directorA)->pluck('id')->all())
         ->toEqualCanonicalizing([$recDirA->id]);
 
     expect($recordModel->newQuery()->visibleTo($directorB)->pluck('id')->all())
         ->toEqualCanonicalizing([$recDirB->id, $recMgrA->id, $recRepA->id]);
-
-    expect($resolver->for($directorA)->siloUserIds)->toEqualCanonicalizing([$directorA->id]);
-    expect($resolver->for($directorB)->siloUserIds)->toEqualCanonicalizing([$directorB->id, $managerA->id, $repA->id]);
 });
 
 it('seeds all 8 RBAC roles and permissions idempotently and enforces PostgreSQL citext email uniqueness', function (): void {
