@@ -14,7 +14,7 @@ return [
     ],
 
     'pages' => [
-        'ensure_pages_exist' => false,
+        'ensure_pages_exist' => true,
         'paths' => [
             resource_path('js/pages'),
             resource_path('js/modules'),
@@ -30,7 +30,7 @@ return [
     ],
 
     'testing' => [
-        'ensure_pages_exist' => false,
+        'ensure_pages_exist' => true,
     ],
 
     'expose_shared_prop_keys' => true,
