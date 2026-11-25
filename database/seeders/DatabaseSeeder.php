@@ -75,5 +75,7 @@ class DatabaseSeeder extends Seeder
         }
 
         app(RebuildUserHierarchyClosureAction::class)->execute($user);
+
+        $this->call(CrmDefaultsSeeder::class);
     }
 }

@@ -68,5 +68,33 @@ export type UserStatusEnum = 'active' | 'suspended' | 'offboarded';
 }
 }
 }
+namespace Crm {
+namespace Companies {
+namespace Enums {
+export type CompanyLifecycleStageEnum = 'lead' | 'prospect' | 'active_client' | 'churned' | 'partner';
+}
+}
+namespace CustomFields {
+namespace Enums {
+export type CustomFieldEntityTypeEnum = 'company' | 'contact' | 'deal' | 'project';
+export type CustomFieldTypeEnum = 'text' | 'textarea' | 'number' | 'currency' | 'boolean' | 'date' | 'select' | 'multi_select' | 'user_id' | 'url';
+}
+}
+namespace Deals {
+namespace Enums {
+export type DealStakeholderRoleEnum = 'decision_maker' | 'champion' | 'billing' | 'technical_buyer' | 'influencer';
+}
+}
+namespace Pipelines {
+namespace Enums {
+export type PipelineStageTypeEnum = 'open' | 'won' | 'lost';
+}
+}
+namespace Timeline {
+namespace Enums {
+export type ActivityTypeEnum = 'note_created' | 'deal_created' | 'stage_changed' | 'field_updated' | 'task_created' | 'task_completed' | 'email_received' | 'email_sent' | 'chat_thread_created' | 'handoff_submitted' | 'handoff_approved' | 'project_provisioned';
+}
+}
+}
 }
 }

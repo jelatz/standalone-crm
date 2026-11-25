@@ -34,6 +34,10 @@ trait HasSiloVisibility
             return $query;
         }
 
+        if ($scope->siloUserIds === []) {
+            return $query->whereRaw('0 = 1');
+        }
+
         $model = $query->getModel();
         $morphAlias = $model->getMorphClass();
         $qualifiedKey = $model->getQualifiedKeyName();

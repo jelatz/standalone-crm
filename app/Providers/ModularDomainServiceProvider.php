@@ -9,6 +9,20 @@ use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\Team;
 use App\Modules\Core\Users\Models\User;
 use App\Modules\Core\Users\Policies\UserPolicy;
+use App\Modules\Crm\Companies\Models\Company;
+use App\Modules\Crm\Companies\Policies\CompanyPolicy;
+use App\Modules\Crm\Contacts\Models\Contact;
+use App\Modules\Crm\Contacts\Policies\ContactPolicy;
+use App\Modules\Crm\CustomFields\Models\CustomFieldDefinition;
+use App\Modules\Crm\CustomFields\Policies\CustomFieldDefinitionPolicy;
+use App\Modules\Crm\Deals\Models\Deal;
+use App\Modules\Crm\Deals\Policies\DealPolicy;
+use App\Modules\Crm\Notes\Models\Note;
+use App\Modules\Crm\Notes\Policies\NotePolicy;
+use App\Modules\Crm\Pipelines\Models\Pipeline;
+use App\Modules\Crm\Pipelines\Models\PipelineStage;
+use App\Modules\Crm\Pipelines\Policies\PipelinePolicy;
+use App\Modules\Crm\Timeline\Models\Activity;
 use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -48,6 +62,30 @@ class ModularDomainServiceProvider extends ServiceProvider
         if (class_exists(AsyncJobRun::class)) {
             $morphMap['async_job_run'] = AsyncJobRun::class;
         }
+        if (class_exists(Company::class)) {
+            $morphMap['company'] = Company::class;
+        }
+        if (class_exists(Contact::class)) {
+            $morphMap['contact'] = Contact::class;
+        }
+        if (class_exists(Deal::class)) {
+            $morphMap['deal'] = Deal::class;
+        }
+        if (class_exists(Note::class)) {
+            $morphMap['note'] = Note::class;
+        }
+        if (class_exists(Pipeline::class)) {
+            $morphMap['pipeline'] = Pipeline::class;
+        }
+        if (class_exists(PipelineStage::class)) {
+            $morphMap['pipeline_stage'] = PipelineStage::class;
+        }
+        if (class_exists(CustomFieldDefinition::class)) {
+            $morphMap['custom_field_definition'] = CustomFieldDefinition::class;
+        }
+        if (class_exists(Activity::class)) {
+            $morphMap['activity'] = Activity::class;
+        }
 
         if ($morphMap !== []) {
             Relation::enforceMorphMap($morphMap);
@@ -59,6 +97,12 @@ class ModularDomainServiceProvider extends ServiceProvider
         $policies = [
             Attachment::class => AttachmentPolicy::class,
             User::class => UserPolicy::class,
+            Company::class => CompanyPolicy::class,
+            Contact::class => ContactPolicy::class,
+            Deal::class => DealPolicy::class,
+            Pipeline::class => PipelinePolicy::class,
+            CustomFieldDefinition::class => CustomFieldDefinitionPolicy::class,
+            Note::class => NotePolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
