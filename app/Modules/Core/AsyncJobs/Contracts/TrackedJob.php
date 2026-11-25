@@ -174,7 +174,7 @@ abstract class TrackedJob implements ShouldQueue
             return;
         }
 
-        event(new AsyncJobStatusUpdated($run));
+        $this->safeBroadcastStatus($run);
 
         try {
             $this->process($run);
@@ -184,7 +184,7 @@ abstract class TrackedJob implements ShouldQueue
                 'finished_at' => now(),
             ])->save();
 
-            event(new AsyncJobStatusUpdated($run));
+            $this->safeBroadcastStatus($run);
         } catch (Throwable $e) {
             $run->forceFill([
                 'status' => AsyncJobStatus::Failed,
@@ -193,9 +193,55 @@ abstract class TrackedJob implements ShouldQueue
                 'finished_at' => now(),
             ])->save();
 
-            event(new AsyncJobStatusUpdated($run));
+            $this->safeBroadcastStatus($run);
 
             throw $e;
+        }
+    }
+
+    public function failed(?Throwable $exception = null): void
+    {
+        if ($this->asyncJobRunId === '') {
+            return;
+        }
+
+        /** @var AsyncJobRun|null $run */
+        $run = DB::transaction(function () use ($exception): ?AsyncJobRun {
+            $lockedRun = AsyncJobRun::query()
+                ->whereKey($this->asyncJobRunId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedRun === null || ! in_array($lockedRun->status, [AsyncJobStatus::Queued, AsyncJobStatus::Running], true)) {
+                return null;
+            }
+
+            $lockedRun->forceFill([
+                'status' => AsyncJobStatus::Failed,
+                'error_code' => $exception !== null
+                    ? Str::limit(class_basename($exception), 64, '')
+                    : 'JobFailed',
+                'error_message' => Str::limit(
+                    $exception?->getMessage() ?? 'Job terminated outside handle()',
+                    1000,
+                ),
+                'finished_at' => now(),
+            ])->save();
+
+            return $lockedRun;
+        });
+
+        if ($run !== null) {
+            $this->safeBroadcastStatus($run);
+        }
+    }
+
+    protected function safeBroadcastStatus(AsyncJobRun $run): void
+    {
+        try {
+            event(new AsyncJobStatusUpdated($run));
+        } catch (Throwable $e) {
+            report($e);
         }
     }
 

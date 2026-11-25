@@ -3,6 +3,7 @@
 namespace App\Support\Silo;
 
 use App\Modules\Core\Rbac\Enums\RoleEnum;
+use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,14 @@ class VisibleScopeResolver
 {
     public function for(User $viewer): VisibleScope
     {
+        if (! $viewer->exists || $viewer->trashed() || $viewer->status !== UserStatusEnum::Active) {
+            return new VisibleScope(
+                viewer: $viewer,
+                isUnrestrictedAdmin: false,
+                siloUserIds: [],
+            );
+        }
+
         if ($viewer->hasRole(RoleEnum::Admin->value)) {
             return new VisibleScope(
                 viewer: $viewer,

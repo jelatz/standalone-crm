@@ -32,6 +32,10 @@ class AuthenticateOidcEmployeeAction
             throw new OidcTenantDeniedException('OIDC identity claims could not be verified.');
         }
 
+        if ($profile->provider === OidcProviderEnum::Microsoft && str_contains($email, '#ext#')) {
+            throw new OidcTenantDeniedException('Microsoft external guest accounts are not authorized for this workspace.');
+        }
+
         if (! $this->isTenantAllowed($profile->provider, $tenantId, $email)) {
             throw new OidcTenantDeniedException('OIDC tenant or domain is not authorized for this workspace.');
         }

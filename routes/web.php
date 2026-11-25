@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/app')->name('root');
 
-Route::middleware('auth')->prefix('app')->group(function (): void {
+Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function (): void {
     Route::inertia('/', 'core/pages/WorkspaceHomePage')
         ->name('app.home');
 

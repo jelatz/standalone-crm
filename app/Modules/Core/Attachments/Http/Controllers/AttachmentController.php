@@ -12,6 +12,7 @@ use App\Modules\Core\Users\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class AttachmentController extends Controller
 {
@@ -20,6 +21,8 @@ class AttachmentController extends Controller
         CreatePresignedUploadAction $createPresignedUpload,
         Request $request,
     ): JsonResponse {
+        Gate::forUser($request->user())->authorize('create', Attachment::class);
+
         /** @var User $user */
         $user = $request->user();
 

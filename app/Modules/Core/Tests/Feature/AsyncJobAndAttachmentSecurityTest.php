@@ -170,9 +170,9 @@ it('verifies PostgreSQL tables, indexes, morph map entries, AttachmentPolicy reg
     $downloadRoute = Route::getRoutes()->getByName('attachments.download');
 
     expect($presignRoute)->not->toBeNull()
-        ->and($presignRoute->gatherMiddleware())->toContain('web', 'auth')
+        ->and($presignRoute->gatherMiddleware())->toContain('web', 'auth', 'active.employee')
         ->and($downloadRoute)->not->toBeNull()
-        ->and($downloadRoute->gatherMiddleware())->toContain('web', 'auth');
+        ->and($downloadRoute->gatherMiddleware())->toContain('web', 'auth', 'active.employee');
 });
 
 it('dispatches TrackedJob to target queue in queued state without executing prematurely', function (): void {
@@ -278,13 +278,18 @@ it('issues presigned upload URLs for allowed MIME types, enforces 50MB max and M
 
     Config::set('filesystems.disks.s3.bucket', 'crm-private-bucket');
 
+    $capturedUploadOptions = null;
     $fakeDisk = Storage::fake('s3');
-    $fakeDisk->buildTemporaryUploadUrlsUsing(function (string $path, DateTimeInterface $expiration, array $options): array {
+    $fakeDisk->buildTemporaryUploadUrlsUsing(function (string $path, DateTimeInterface $expiration, array $options) use (&$capturedUploadOptions): array {
+        $capturedUploadOptions = $options;
+
         return [
             'url' => 'https://s3.internal.test/upload/'.$path.'?exp='.$expiration->getTimestamp(),
             'headers' => [
                 'Host' => ['s3.internal.test'],
+                'host' => ['lowercase.internal.test'],
                 'Content-Type' => [$options['ContentType'] ?? 'application/octet-stream'],
+                'Content-Length' => [(string) ($options['ContentLength'] ?? 0)],
             ],
         ];
     });
@@ -296,6 +301,28 @@ it('issues presigned upload URLs for allowed MIME types, enforces 50MB max and M
         'size_bytes' => 1024,
         'sha256' => $sha256,
     ])->assertUnauthorized();
+
+    // Authenticated user without roles or inactive status rejected with 403 by AttachmentPolicy::create
+    $zeroRoleUser = User::query()->create([
+        'employee_code' => 'EMP-UP-NOROLE',
+        'name' => 'No Role User',
+        'email' => 'norole.uploader@acme.com',
+        'department_id' => $dept->id,
+        'status' => UserStatusEnum::Active,
+    ]);
+    $suspendedUser = createAttachmentTestUser($dept, 'EMP-UP-SUSP', 'susp.uploader@acme.com', RoleEnum::Sales);
+    $suspendedUser->forceFill(['status' => UserStatusEnum::Suspended])->save();
+
+    expect(Gate::forUser($zeroRoleUser)->allows('create', Attachment::class))->toBeFalse()
+        ->and(Gate::forUser($suspendedUser)->allows('create', Attachment::class))->toBeFalse()
+        ->and(Gate::forUser($user)->allows('create', Attachment::class))->toBeTrue();
+
+    $this->actingAs($zeroRoleUser)->postJson('/api/internal/attachments/presign', [
+        'filename' => 'quote.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 1024,
+        'sha256' => $sha256,
+    ])->assertForbidden();
 
     // Valid upload with path traversal characters in filename
     $response = $this->actingAs($user)->postJson('/api/internal/attachments/presign', [
@@ -315,11 +342,18 @@ it('issues presigned upload URLs for allowed MIME types, enforces 50MB max and M
         ]);
 
     $payload = $response->json();
-    expect($payload['object_key'])->toStartWith('uploads/'.now()->format('Y/m').'/'.$payload['attachment_id'].'/')
+    $normalizedHeaderKeys = array_map('strtolower', array_keys($payload['headers']));
+
+    expect($capturedUploadOptions)->toBe([
+        'ContentType' => 'application/pdf',
+        'ContentLength' => 52_428_800,
+    ])
+        ->and($payload['object_key'])->toStartWith('uploads/'.now()->format('Y/m').'/'.$payload['attachment_id'].'/')
         ->and($payload['object_key'])->not->toContain('..')
+        ->and($normalizedHeaderKeys)->not->toContain('host')
         ->and($payload['headers'])->toBe([
-            'Host' => 's3.internal.test',
             'Content-Type' => 'application/pdf',
+            'Content-Length' => '52428800',
         ]);
 
     $attachment = Attachment::query()->findOrFail($payload['attachment_id']);
@@ -489,8 +523,23 @@ it('enforces silo isolation, entity_collaborators sharing, link binding, and qua
         ->get("/attachments/{$attachment->id}/download?{$validQuery}")
         ->assertForbidden();
 
+    // Pending attachment denied even for owner and admin -> 403 (Clean-only downloads)
+    $attachment->forceFill(['scan_status' => AttachmentScanStatus::Pending])->save();
+
+    expect(Gate::forUser($ownerA)->allows('view', [$attachment, $recordA]))->toBeFalse();
+
+    $this->actingAs($ownerA)
+        ->get("/attachments/{$attachment->id}/download?{$validQuery}")
+        ->assertForbidden();
+
+    $this->actingAs($admin)
+        ->get("/attachments/{$attachment->id}/download?{$validQuery}")
+        ->assertForbidden();
+
     // Quarantined attachment denied even for owner and admin -> 403
     $attachment->forceFill(['scan_status' => AttachmentScanStatus::Quarantined])->save();
+
+    expect(Gate::forUser($ownerA)->allows('view', [$attachment, $recordA]))->toBeFalse();
 
     $this->actingAs($ownerA)
         ->get("/attachments/{$attachment->id}/download?{$validQuery}")

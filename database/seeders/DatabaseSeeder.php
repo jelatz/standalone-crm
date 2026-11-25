@@ -2,7 +2,11 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
+use App\Modules\Core\Rbac\Enums\RoleEnum;
+use App\Modules\Core\Users\Actions\RebuildUserHierarchyClosureAction;
+use App\Modules\Core\Users\Enums\UserStatusEnum;
+use App\Modules\Core\Users\Models\Department;
+use App\Modules\Core\Users\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -15,11 +19,28 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $this->call(RolesPermissionsSeeder::class);
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        $department = Department::query()->firstOrCreate(
+            ['slug' => 'general'],
+            ['name' => 'General'],
+        );
+
+        $user = User::query()->firstOrCreate(
+            ['email' => 'admin@example.com'],
+            [
+                'employee_code' => 'EMP-0001',
+                'name' => 'Admin User',
+                'department_id' => $department->id,
+                'job_title' => 'System Administrator',
+                'status' => UserStatusEnum::Active,
+            ],
+        );
+
+        if (! $user->hasRole(RoleEnum::Admin->value)) {
+            $user->assignRole(RoleEnum::Admin->value);
+        }
+
+        app(RebuildUserHierarchyClosureAction::class)->execute($user);
     }
 }

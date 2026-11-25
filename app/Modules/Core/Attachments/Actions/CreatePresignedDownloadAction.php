@@ -18,8 +18,8 @@ class CreatePresignedDownloadAction
 {
     public function execute(User $viewer, Attachment $attachment, string $contextType, string $contextId): string
     {
-        if ($attachment->scan_status === AttachmentScanStatus::Quarantined) {
-            throw new AuthorizationException('This attachment is quarantined and cannot be downloaded.');
+        if ($attachment->scan_status !== AttachmentScanStatus::Clean) {
+            throw new AuthorizationException('This attachment has not passed security scanning and cannot be downloaded.');
         }
 
         if (! Str::isUuid($contextId)) {

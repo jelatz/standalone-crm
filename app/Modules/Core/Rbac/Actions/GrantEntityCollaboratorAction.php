@@ -17,17 +17,28 @@ class GrantEntityCollaboratorAction
         CollaboratorRoleLabel $roleLabel,
         User $grantedBy,
     ): EntityCollaborator {
-        return EntityCollaborator::query()->updateOrCreate(
+        $collaboratableType = $collaboratable->getMorphClass();
+        $collaboratableId = (string) $collaboratable->getKey();
+
+        EntityCollaborator::query()->upsert(
             [
-                'collaboratable_type' => $collaboratable->getMorphClass(),
-                'collaboratable_id' => (string) $collaboratable->getKey(),
-                'user_id' => $user->id,
+                [
+                    'collaboratable_type' => $collaboratableType,
+                    'collaboratable_id' => $collaboratableId,
+                    'user_id' => (string) $user->id,
+                    'access_level' => $accessLevel->value,
+                    'role_label' => $roleLabel->value,
+                    'granted_by_id' => (string) $grantedBy->id,
+                ],
             ],
-            [
-                'access_level' => $accessLevel,
-                'role_label' => $roleLabel,
-                'granted_by_id' => $grantedBy->id,
-            ],
+            ['collaboratable_type', 'collaboratable_id', 'user_id'],
+            ['access_level', 'role_label', 'granted_by_id'],
         );
+
+        return EntityCollaborator::query()
+            ->where('collaboratable_type', $collaboratableType)
+            ->where('collaboratable_id', $collaboratableId)
+            ->where('user_id', (string) $user->id)
+            ->firstOrFail();
     }
 }

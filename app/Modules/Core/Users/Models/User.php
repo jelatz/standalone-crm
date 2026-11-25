@@ -2,10 +2,13 @@
 
 namespace App\Modules\Core\Users\Models;
 
+use App\Modules\Core\Auth\Actions\RevokeEmployeeSessionsAction;
 use App\Modules\Core\Auth\Models\OauthIdentity;
 use App\Modules\Core\Rbac\Models\EntityCollaborator;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Support\Concerns\HasUuidV7;
+use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -15,6 +18,9 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
+    /** @use HasFactory<UserFactory> */
+    use HasFactory;
+
     use HasRoles;
     use HasUuidV7;
     use Notifiable;
@@ -23,6 +29,14 @@ class User extends Authenticatable
     protected string $guard_name = 'web';
 
     protected $rememberTokenName = '';
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => UserStatusEnum::Active->value,
+        'timezone' => 'UTC',
+    ];
 
     /**
      * @var list<string>
@@ -40,6 +54,29 @@ class User extends Authenticatable
         'timezone',
         'last_seen_at',
     ];
+
+    protected static function newFactory(): UserFactory
+    {
+        return UserFactory::new();
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (self $user): void {
+            $statusRevoked = ($user->isDirty('status') || $user->wasChanged('status'))
+                && $user->status !== UserStatusEnum::Active;
+            $deletedAtRevoked = ($user->isDirty('deleted_at') || $user->wasChanged('deleted_at'))
+                && $user->deleted_at !== null;
+
+            if ($statusRevoked || $deletedAtRevoked) {
+                app(RevokeEmployeeSessionsAction::class)->execute($user);
+            }
+        });
+
+        static::deleted(function (self $user): void {
+            app(RevokeEmployeeSessionsAction::class)->execute($user);
+        });
+    }
 
     /**
      * @return array<string, string>

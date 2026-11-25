@@ -14,6 +14,7 @@ use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\User;
 use Database\Seeders\RolesPermissionsSeeder;
 use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request as Psr7Request;
 use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -251,6 +252,7 @@ it('authenticates valid Microsoft 365 tid login and creates oauth_identities row
             'id' => 'ms-oid-001',
             'userPrincipalName' => 'bob@acme.com',
             'tid' => '11111111-2222-3333-4444-555555555555',
+            'xms_edov' => true,
         ],
         token: 'ms-access-token',
         refreshToken: 'ms-refresh-token',
@@ -283,6 +285,7 @@ it('rejects wrong Microsoft tenant tid and Microsoft consumer tenant with 403', 
             'id' => 'ms-oid-bad',
             'userPrincipalName' => 'bob@acme.com',
             'tid' => $tenantId,
+            'xms_edov' => true,
         ],
     );
 
@@ -623,12 +626,231 @@ it('verifies PostgreSQL citext column, unique index, and web middleware on modul
     expect($indexes)->toContain('uq_oauth_identities_provider_user', 'idx_oauth_identities_user_provider');
 
     $loginRoute = Route::getRoutes()->getByName('login');
+    $redirectRoute = Route::getRoutes()->getByName('auth.sso.redirect');
     $callbackRoute = Route::getRoutes()->getByName('auth.sso.callback');
     $webGroup = app(HttpKernel::class)->getMiddlewareGroups()['web'] ?? [];
 
     expect($loginRoute)->not->toBeNull()
-        ->and($loginRoute->gatherMiddleware())->toContain('web')
+        ->and($loginRoute->gatherMiddleware())->toContain('web', 'guest')
+        ->and($redirectRoute)->not->toBeNull()
+        ->and($redirectRoute->gatherMiddleware())->toContain('web', 'throttle:20,1')
         ->and($callbackRoute)->not->toBeNull()
-        ->and($callbackRoute->gatherMiddleware())->toContain('web')
+        ->and($callbackRoute->gatherMiddleware())->toContain('web', 'throttle:20,1')
         ->and($webGroup)->toContain(HandleInertiaRequests::class);
+});
+
+it('fails closed with 403 when Microsoft login omits both xms_edov and email_verified claims', function (bool $useJwtClaims): void {
+    $department = createSsoDepartment();
+    createSsoEmployee($department, 'no.edov@acme.com', UserStatusEnum::Active, 'EMP-1012', 'No Edov');
+
+    $graphUser = makeFakeSocialiteUser(
+        id: 'ms-oid-no-edov',
+        email: 'no.edov@acme.com',
+        name: 'No Edov',
+        rawClaims: [
+            'id' => 'ms-oid-no-edov',
+            'userPrincipalName' => 'no.edov@acme.com',
+            'tid' => '11111111-2222-3333-4444-555555555555',
+        ],
+    );
+
+    if ($useJwtClaims) {
+        mockMicrosoftProviderCallback($graphUser, (object) [
+            'tid' => '11111111-2222-3333-4444-555555555555',
+            'email' => 'no.edov@acme.com',
+        ]);
+    } else {
+        mockSocialiteCallback('microsoft', $graphUser);
+    }
+
+    $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state')
+        ->assertForbidden();
+
+    $this->assertGuest();
+    expect(OauthIdentity::query()->count())->toBe(0);
+})->with([
+    'raw Graph claims without verification' => [false],
+    'verified JWT claims without verification' => [true],
+]);
+
+it('rejects Microsoft #EXT# B2B guest UPNs and emails case-insensitively across SsoController and AuthenticateOidcEmployeeAction', function (
+    string $mappedEmail,
+    array $rawClaims,
+    ?array $jwtClaims,
+): void {
+    $department = createSsoDepartment();
+    createSsoEmployee($department, 'guest@acme.com', UserStatusEnum::Active, 'EMP-1013', 'Guest User');
+
+    $graphUser = makeFakeSocialiteUser(
+        id: 'ms-oid-ext-guest',
+        email: $mappedEmail,
+        name: 'Guest User',
+        rawClaims: $rawClaims,
+    );
+
+    if ($jwtClaims !== null) {
+        mockMicrosoftProviderCallback($graphUser, (object) $jwtClaims);
+    } else {
+        mockSocialiteCallback('microsoft', $graphUser);
+    }
+
+    $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state')
+        ->assertForbidden();
+
+    $this->assertGuest();
+    expect(OauthIdentity::query()->count())->toBe(0);
+
+    $action = app(AuthenticateOidcEmployeeAction::class);
+    $profile = new OidcProfileData(
+        provider: OidcProviderEnum::Microsoft,
+        providerUserId: 'ms-oid-ext-action',
+        providerTenantId: '11111111-2222-3333-4444-555555555555',
+        email: 'external_evil.com#ext#@acme.onmicrosoft.com',
+        emailVerified: true,
+        name: 'Guest User',
+        accessToken: 'token',
+    );
+
+    expect(fn (): User => $action->execute($profile))
+        ->toThrow(OidcTenantDeniedException::class);
+})->with([
+    'uppercase #EXT# in userPrincipalName despite clean mail' => [
+        'guest@acme.com',
+        [
+            'id' => 'ms-oid-ext-1',
+            'mail' => 'guest@acme.com',
+            'userPrincipalName' => 'guest_partner.com#EXT#@acme.onmicrosoft.com',
+            'tid' => '11111111-2222-3333-4444-555555555555',
+            'xms_edov' => true,
+        ],
+        null,
+    ],
+    'lowercase #ext# in preferred_username JWT claim' => [
+        'guest@acme.com',
+        [
+            'id' => 'ms-oid-ext-2',
+            'mail' => 'guest@acme.com',
+        ],
+        [
+            'tid' => '11111111-2222-3333-4444-555555555555',
+            'xms_edov' => true,
+            'email' => 'guest@acme.com',
+            'preferred_username' => 'guest_partner.com#ext#@acme.onmicrosoft.com',
+        ],
+    ],
+]);
+
+it('prioritizes signature-verified JWT claims->tid over raw tid when Microsoft tenant claims conflict', function (): void {
+    $department = createSsoDepartment();
+    createSsoEmployee($department, 'spoof@acme.com', UserStatusEnum::Active, 'EMP-1014', 'Spoof Test');
+
+    $graphUser = makeFakeSocialiteUser(
+        id: 'ms-oid-tid-priority',
+        email: 'spoof@acme.com',
+        name: 'Spoof Test',
+        rawClaims: [
+            'id' => 'ms-oid-tid-priority',
+            'userPrincipalName' => 'spoof@acme.com',
+            'tid' => '11111111-2222-3333-4444-555555555555',
+            'xms_edov' => true,
+        ],
+    );
+
+    mockMicrosoftProviderCallback($graphUser, (object) [
+        'tid' => MicrosoftProvider::MS_ENTRA_CONSUMER_TENANT_ID,
+        'xms_edov' => true,
+        'email' => 'spoof@acme.com',
+    ]);
+
+    $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state')
+        ->assertForbidden();
+
+    $this->assertGuest();
+    expect(OauthIdentity::query()->count())->toBe(0);
+});
+
+it('falls through empty-string JWT email and name claims to preferred_username and email and stores auth.authenticated_at', function (): void {
+    $department = createSsoDepartment();
+    $user = createSsoEmployee($department, 'fallback.upn@acme.com', UserStatusEnum::Active, 'EMP-1015', 'Fallback UPN');
+
+    $graphUser = (new SocialiteTwoUser)->setRaw([
+        'id' => 'ms-oid-empty-claims',
+        'displayName' => '',
+    ])->map([
+        'id' => 'ms-oid-empty-claims',
+        'name' => '',
+        'email' => '',
+    ])->setToken('ms-token')
+        ->setRefreshToken('ms-refresh')
+        ->setExpiresIn(3600)
+        ->setApprovedScopes(['openid', 'profile']);
+
+    mockMicrosoftProviderCallback($graphUser, (object) [
+        'tid' => '11111111-2222-3333-4444-555555555555',
+        'xms_edov' => true,
+        'email' => '',
+        'preferred_username' => 'fallback.upn@acme.com',
+        'name' => '',
+    ]);
+
+    $response = $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state');
+
+    $response->assertRedirect('/app');
+    $this->assertAuthenticatedAs($user);
+    expect(session('auth.authenticated_at'))->toBeInt()->toBeGreaterThan(0);
+
+    $identity = OauthIdentity::query()->where('user_id', $user->id)->first();
+    expect($identity)->not->toBeNull()
+        ->and($identity->email)->toBe('fallback.upn@acme.com');
+});
+
+it('redirects cleanly to /login with error on Guzzle ConnectException during OAuth token exchange', function (): void {
+    $connectFailProvider = Mockery::mock();
+    $connectFailProvider->shouldReceive('user')
+        ->once()
+        ->andThrow(new ConnectException('Connection timed out', new Psr7Request('POST', 'https://oauth2.googleapis.com/token')));
+
+    $factory = Mockery::mock(SocialiteFactory::class);
+    $factory->shouldReceive('driver')->with('google')->once()->andReturn($connectFailProvider);
+    Socialite::swap($factory);
+
+    $this->get('/auth/google/callback?code=valid-code&state=valid-state')
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors('sso');
+
+    $this->assertGuest();
+});
+
+it('redirects authenticated users away from GET /login to /app and rate-limits OIDC redirect and callback routes', function (): void {
+    $department = createSsoDepartment();
+    $user = createSsoEmployee($department, 'guestcheck@acme.com', UserStatusEnum::Active, 'EMP-1016', 'Guest Check');
+
+    $this->actingAs($user)
+        ->get('/login')
+        ->assertRedirect('/app');
+
+    $this->post('/logout')->assertRedirect('/login');
+
+    $mockGoogle = Mockery::mock();
+    $mockGoogle->shouldReceive('redirect')
+        ->times(20)
+        ->andReturn(new RedirectResponse('https://accounts.google.com/o/oauth2/auth?state=xyz'));
+
+    $factory = Mockery::mock(SocialiteFactory::class);
+    $factory->shouldReceive('driver')->with('google')->times(20)->andReturn($mockGoogle);
+    Socialite::swap($factory);
+
+    for ($i = 0; $i < 20; $i++) {
+        $this->get('/auth/google/redirect')->assertRedirect('https://accounts.google.com/o/oauth2/auth?state=xyz');
+    }
+
+    $this->get('/auth/google/redirect')->assertStatus(429);
+
+    Cache::flush();
+
+    for ($i = 0; $i < 20; $i++) {
+        $this->get('/auth/google/callback')->assertRedirect('/login');
+    }
+
+    $this->get('/auth/google/callback')->assertStatus(429);
 });

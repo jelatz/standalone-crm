@@ -12,6 +12,7 @@ use App\Modules\Core\Users\Models\User;
 use Database\Seeders\RolesPermissionsSeeder;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -333,4 +334,147 @@ it('guards TrackedJob::handle() against duplicate delivery when run is already R
         ->and($freshRunning->attempt)->toBe(1)
         ->and($freshRunning->finished_at)->toBeNull();
     Event::assertNotDispatched(AsyncJobStatusUpdated::class);
+});
+
+it('isolates broadcasting exceptions so Reverb outages never abort Running or overwrite Completed -> Failed', function () use ($createIntegrationUser): void {
+    $dept = Department::query()->create(['name' => 'Ops', 'slug' => 'ops-broadcast-isolation']);
+    $user = $createIntegrationUser($dept, 'EMP-JOB-ISO', 'job.isolation@acme.com', RoleEnum::Sales);
+    $subjectId = (string) Str::uuid7();
+
+    $observedStatuses = [];
+
+    Event::listen(AsyncJobStatusUpdated::class, static function (AsyncJobStatusUpdated $event) use (&$observedStatuses): void {
+        $observedStatuses[] = $event->status;
+
+        throw new RuntimeException('Reverb server unreachable during '.$event->status->value);
+    });
+
+    try {
+        $completedRun = IntegrationSuccessTrackedJob::dispatchTracked(
+            constructorArgs: [$subjectId, 'reverb-outage-ok'],
+            subjectType: 'deal',
+            subjectId: $subjectId,
+            triggeredById: (string) $user->id,
+        );
+
+        $freshCompleted = $completedRun->fresh();
+        expect($freshCompleted->status)->toBe(AsyncJobStatus::Completed)
+            ->and($freshCompleted->error_code)->toBeNull()
+            ->and($freshCompleted->error_message)->toBeNull()
+            ->and($freshCompleted->finished_at)->not->toBeNull()
+            ->and(IntegrationSuccessTrackedJob::$processedSnapshots)->toHaveCount(1)
+            ->and($observedStatuses)->toBe([AsyncJobStatus::Running, AsyncJobStatus::Completed]);
+
+        // When process() itself throws and Failed broadcast also fails, preserve original domain failure
+        $thrown = null;
+        try {
+            IntegrationFailingTrackedJob::dispatchTracked(
+                constructorArgs: ['Domain processor failed'],
+                subjectType: 'deal',
+                subjectId: $subjectId,
+                triggeredById: (string) $user->id,
+            );
+        } catch (RuntimeException $e) {
+            $thrown = $e;
+        }
+
+        expect($thrown)->toBeInstanceOf(RuntimeException::class)
+            ->and($thrown?->getMessage())->toBe('Domain processor failed');
+
+        $failedRun = AsyncJobRun::query()
+            ->where('job_class', IntegrationFailingTrackedJob::class)
+            ->latest('queued_at')
+            ->firstOrFail();
+        expect($failedRun->status)->toBe(AsyncJobStatus::Failed)
+            ->and($failedRun->error_code)->toBe('RuntimeException')
+            ->and($failedRun->error_message)->toBe('Domain processor failed')
+            ->and($observedStatuses)->toBe([
+                AsyncJobStatus::Running,
+                AsyncJobStatus::Completed,
+                AsyncJobStatus::Running,
+                AsyncJobStatus::Failed,
+            ]);
+    } finally {
+        Event::forget(AsyncJobStatusUpdated::class);
+    }
+});
+
+it('transitions stuck Running or Queued runs to Failed via failed() fallback without overwriting Completed runs', function () use ($createIntegrationUser): void {
+    $dept = Department::query()->create(['name' => 'Ops', 'slug' => 'ops-failed-fallback']);
+    $user = $createIntegrationUser($dept, 'EMP-JOB-FB', 'job.fallback@acme.com', RoleEnum::Sales);
+    $subjectId = (string) Str::uuid7();
+
+    Event::fake([AsyncJobStatusUpdated::class]);
+
+    $stuckRunning = AsyncJobRun::query()->create([
+        'job_class' => IntegrationSuccessTrackedJob::class,
+        'queue' => 'default',
+        'subject_type' => 'deal',
+        'subject_id' => $subjectId,
+        'triggered_by_id' => $user->id,
+        'status' => AsyncJobStatus::Running,
+        'attempt' => 1,
+        'payload_summary' => [],
+        'queued_at' => now()->subMinute(),
+        'started_at' => now()->subSeconds(30),
+    ]);
+
+    $jobForRunning = new IntegrationSuccessTrackedJob($subjectId, 'killed-worker');
+    $jobForRunning->asyncJobRunId = (string) $stuckRunning->id;
+    $jobForRunning->failed(new MaxAttemptsExceededException('Job timed out or exceeded max attempts.'));
+
+    $freshFailed = $stuckRunning->fresh();
+    expect($freshFailed->status)->toBe(AsyncJobStatus::Failed)
+        ->and($freshFailed->error_code)->toBe('MaxAttemptsExceededException')
+        ->and($freshFailed->error_message)->toBe('Job timed out or exceeded max attempts.')
+        ->and($freshFailed->finished_at)->not->toBeNull();
+
+    // Queued job killed with null exception falls back to JobFailed defaults
+    $stuckQueued = AsyncJobRun::query()->create([
+        'job_class' => IntegrationSuccessTrackedJob::class,
+        'queue' => 'default',
+        'subject_type' => 'deal',
+        'subject_id' => $subjectId,
+        'triggered_by_id' => $user->id,
+        'status' => AsyncJobStatus::Queued,
+        'attempt' => 1,
+        'payload_summary' => [],
+        'queued_at' => now()->subMinute(),
+    ]);
+
+    $jobForQueued = new IntegrationSuccessTrackedJob($subjectId, 'killed-queued');
+    $jobForQueued->asyncJobRunId = (string) $stuckQueued->id;
+    $jobForQueued->failed();
+
+    $freshQueuedFailed = $stuckQueued->fresh();
+    expect($freshQueuedFailed->status)->toBe(AsyncJobStatus::Failed)
+        ->and($freshQueuedFailed->error_code)->toBe('JobFailed')
+        ->and($freshQueuedFailed->error_message)->toBe('Job terminated outside handle()')
+        ->and($freshQueuedFailed->finished_at)->not->toBeNull();
+
+    // Already Completed run is never overwritten by a late failed() call
+    $completedRun = AsyncJobRun::query()->create([
+        'job_class' => IntegrationSuccessTrackedJob::class,
+        'queue' => 'default',
+        'subject_type' => 'deal',
+        'subject_id' => $subjectId,
+        'triggered_by_id' => $user->id,
+        'status' => AsyncJobStatus::Completed,
+        'attempt' => 1,
+        'payload_summary' => [],
+        'queued_at' => now()->subMinutes(2),
+        'started_at' => now()->subMinute(),
+        'finished_at' => now()->subSeconds(10),
+    ]);
+
+    $jobForCompleted = new IntegrationSuccessTrackedJob($subjectId, 'already-done');
+    $jobForCompleted->asyncJobRunId = (string) $completedRun->id;
+    $jobForCompleted->failed(new RuntimeException('Late termination signal'));
+
+    $freshCompleted = $completedRun->fresh();
+    expect($freshCompleted->status)->toBe(AsyncJobStatus::Completed)
+        ->and($freshCompleted->error_code)->toBeNull()
+        ->and($freshCompleted->error_message)->toBeNull();
+
+    Event::assertDispatchedTimes(AsyncJobStatusUpdated::class, 2);
 });

@@ -47,6 +47,7 @@ class CreatePresignedUploadAction
         /** @var array{url?: mixed, headers?: mixed} $presigned */
         $presigned = $filesystem->temporaryUploadUrl($objectKey, $expiresAt, [
             'ContentType' => $normalizedMime,
+            'ContentLength' => $data->size_bytes,
         ]);
 
         $uploadUrl = (string) ($presigned['url'] ?? '');
@@ -149,10 +150,15 @@ class CreatePresignedUploadAction
         $headers = [];
 
         foreach ($rawHeaders as $key => $value) {
+            $headerName = (string) $key;
+            if (strtolower(trim($headerName)) === 'host') {
+                continue;
+            }
+
             if (is_array($value)) {
-                $headers[(string) $key] = implode(', ', array_map('strval', $value));
+                $headers[$headerName] = implode(', ', array_map('strval', $value));
             } elseif ($value !== null) {
-                $headers[(string) $key] = (string) $value;
+                $headers[$headerName] = (string) $value;
             }
         }
 

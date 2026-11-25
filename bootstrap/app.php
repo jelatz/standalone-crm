@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Modules\Core\Auth\Http\Middleware\EnsureEmployeeIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -13,9 +14,13 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',
-        ['middleware' => ['web', 'auth']],
+        ['middleware' => ['web', 'auth', 'active.employee']],
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->alias([
+            'active.employee' => EnsureEmployeeIsActive::class,
+        ]);
+
         $middleware->web(append: [
             HandleInertiaRequests::class,
         ]);
