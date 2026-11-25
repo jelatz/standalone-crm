@@ -2,8 +2,15 @@
 
 namespace App\Providers;
 
+use App\Modules\Core\Attachments\Models\Attachment;
+use App\Modules\Core\Attachments\Policies\AttachmentPolicy;
+use App\Modules\Core\Auth\Models\OauthIdentity;
+use App\Modules\Core\Users\Models\Department;
+use App\Modules\Core\Users\Models\Team;
+use App\Modules\Core\Users\Models\User;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class ModularDomainServiceProvider extends ServiceProvider
@@ -24,17 +31,20 @@ class ModularDomainServiceProvider extends ServiceProvider
     {
         $morphMap = [];
 
-        if (class_exists(\App\Modules\Core\Users\Models\User::class)) {
-            $morphMap['user'] = \App\Modules\Core\Users\Models\User::class;
+        if (class_exists(User::class)) {
+            $morphMap['user'] = User::class;
         }
-        if (class_exists(\App\Modules\Core\Users\Models\Department::class)) {
-            $morphMap['department'] = \App\Modules\Core\Users\Models\Department::class;
+        if (class_exists(Department::class)) {
+            $morphMap['department'] = Department::class;
         }
-        if (class_exists(\App\Modules\Core\Users\Models\Team::class)) {
-            $morphMap['team'] = \App\Modules\Core\Users\Models\Team::class;
+        if (class_exists(Team::class)) {
+            $morphMap['team'] = Team::class;
         }
-        if (class_exists(\App\Modules\Core\Attachments\Models\Attachment::class)) {
-            $morphMap['attachment'] = \App\Modules\Core\Attachments\Models\Attachment::class;
+        if (class_exists(OauthIdentity::class)) {
+            $morphMap['oauth_identity'] = OauthIdentity::class;
+        }
+        if (class_exists(Attachment::class)) {
+            $morphMap['attachment'] = Attachment::class;
         }
 
         if ($morphMap !== []) {
@@ -45,7 +55,7 @@ class ModularDomainServiceProvider extends ServiceProvider
     protected function registerModulePolicies(): void
     {
         $policies = [
-            \App\Modules\Core\Attachments\Models\Attachment::class => \App\Modules\Core\Attachments\Policies\AttachmentPolicy::class,
+            Attachment::class => AttachmentPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -58,7 +68,7 @@ class ModularDomainServiceProvider extends ServiceProvider
     protected function registerModuleRoutes(): void
     {
         foreach (glob(app_path('Modules/*/*/routes.php')) ?: [] as $routeFile) {
-            $this->loadRoutesFrom($routeFile);
+            Route::middleware('web')->group($routeFile);
         }
     }
 }

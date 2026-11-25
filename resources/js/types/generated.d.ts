@@ -1,6 +1,23 @@
 declare namespace App {
 namespace Modules {
 namespace Core {
+namespace Auth {
+namespace Data {
+export type AuthenticatedUserData = {
+id: string,
+name: string,
+email: string,
+employee_code: string,
+job_title: string | null,
+department_id: string,
+roles: string[],
+permissions: string[],
+};
+}
+namespace Enums {
+export type OidcProviderEnum = 'google' | 'microsoft';
+}
+}
 namespace Rbac {
 namespace Enums {
 export type CollaboratorAccessLevel = 'viewer' | 'editor' | 'manager';

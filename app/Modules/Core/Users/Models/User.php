@@ -2,6 +2,7 @@
 
 namespace App\Modules\Core\Users\Models;
 
+use App\Modules\Core\Auth\Models\OauthIdentity;
 use App\Modules\Core\Rbac\Models\EntityCollaborator;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Support\Concerns\HasUuidV7;
@@ -20,6 +21,8 @@ class User extends Authenticatable
     use SoftDeletes;
 
     protected string $guard_name = 'web';
+
+    protected $rememberTokenName = '';
 
     /**
      * @var list<string>
@@ -103,5 +106,13 @@ class User extends Authenticatable
     public function entityCollaborations(): HasMany
     {
         return $this->hasMany(EntityCollaborator::class, 'user_id');
+    }
+
+    /**
+     * @return HasMany<OauthIdentity, $this>
+     */
+    public function oauthIdentities(): HasMany
+    {
+        return $this->hasMany(OauthIdentity::class, 'user_id');
     }
 }
