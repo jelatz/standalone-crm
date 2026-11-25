@@ -55,46 +55,69 @@ abstract class TrackedJob implements ShouldQueue
             $payloadSummary,
             $queue,
         ): array {
+            $jobClass = Str::limit(static::class, 180, '');
+            $normalizedQueue = Str::limit($queue, 64, '');
+
             if ($normalizedKey !== null) {
+                $encodedPayload = $payloadSummary === []
+                    ? '{}'
+                    : json_encode($payloadSummary, JSON_THROW_ON_ERROR);
+
+                $inserted = DB::table('async_job_runs')->insertOrIgnore([
+                    'id' => (string) Str::uuid7(),
+                    'job_class' => $jobClass,
+                    'queue' => $normalizedQueue,
+                    'subject_type' => $subjectType,
+                    'subject_id' => $subjectId,
+                    'triggered_by_id' => $triggeredById,
+                    'status' => AsyncJobStatus::Queued->value,
+                    'attempt' => 1,
+                    'idempotency_key' => $normalizedKey,
+                    'payload_summary' => $encodedPayload,
+                    'queued_at' => now(),
+                ]);
+
                 $existing = AsyncJobRun::query()
                     ->where('idempotency_key', $normalizedKey)
                     ->lockForUpdate()
-                    ->first();
+                    ->firstOrFail();
 
-                if ($existing !== null) {
-                    if ($existing->status !== AsyncJobStatus::Failed) {
-                        return [$existing, false];
-                    }
-
-                    $existing->forceFill([
-                        'job_class' => Str::limit(static::class, 180, ''),
-                        'queue' => Str::limit($queue, 64, ''),
-                        'subject_type' => $subjectType,
-                        'subject_id' => $subjectId,
-                        'triggered_by_id' => $triggeredById,
-                        'status' => AsyncJobStatus::Queued,
-                        'attempt' => 1,
-                        'payload_summary' => $payloadSummary,
-                        'error_code' => null,
-                        'error_message' => null,
-                        'queued_at' => now(),
-                        'started_at' => null,
-                        'finished_at' => null,
-                    ])->save();
-
+                if ($inserted > 0) {
                     return [$existing, true];
                 }
+
+                if ($existing->status !== AsyncJobStatus::Failed) {
+                    return [$existing, false];
+                }
+
+                $existing->forceFill([
+                    'job_class' => $jobClass,
+                    'queue' => $normalizedQueue,
+                    'subject_type' => $subjectType,
+                    'subject_id' => $subjectId,
+                    'triggered_by_id' => $triggeredById,
+                    'status' => AsyncJobStatus::Queued,
+                    'attempt' => 1,
+                    'payload_summary' => $payloadSummary,
+                    'error_code' => null,
+                    'error_message' => null,
+                    'queued_at' => now(),
+                    'started_at' => null,
+                    'finished_at' => null,
+                ])->save();
+
+                return [$existing, true];
             }
 
             $run = AsyncJobRun::query()->create([
-                'job_class' => Str::limit(static::class, 180, ''),
-                'queue' => Str::limit($queue, 64, ''),
+                'job_class' => $jobClass,
+                'queue' => $normalizedQueue,
                 'subject_type' => $subjectType,
                 'subject_id' => $subjectId,
                 'triggered_by_id' => $triggeredById,
                 'status' => AsyncJobStatus::Queued,
                 'attempt' => 1,
-                'idempotency_key' => $normalizedKey,
+                'idempotency_key' => null,
                 'payload_summary' => $payloadSummary,
                 'queued_at' => now(),
             ]);
@@ -107,6 +130,7 @@ abstract class TrackedJob implements ShouldQueue
         if ($shouldDispatch) {
             $job = static::instantiateTrackedJob($run, $constructorArgs);
             $job->onQueue($queue);
+            $job->afterCommit();
             dispatch($job);
         }
 
@@ -119,20 +143,36 @@ abstract class TrackedJob implements ShouldQueue
             throw new LogicException('TrackedJob must be dispatched with an AsyncJobRun ID.');
         }
 
-        $run = AsyncJobRun::query()->findOrFail($this->asyncJobRunId);
+        /** @var AsyncJobRun|null $run */
+        $run = DB::transaction(function (): ?AsyncJobRun {
+            $lockedRun = AsyncJobRun::query()
+                ->whereKey($this->asyncJobRunId)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $attempt = $run->started_at !== null
-            ? max($this->attempts(), $run->attempt + 1)
-            : max($this->attempts(), $run->attempt);
+            if (! in_array($lockedRun->status, [AsyncJobStatus::Queued, AsyncJobStatus::Failed], true)) {
+                return null;
+            }
 
-        $run->forceFill([
-            'status' => AsyncJobStatus::Running,
-            'attempt' => $attempt,
-            'started_at' => now(),
-            'finished_at' => null,
-            'error_code' => null,
-            'error_message' => null,
-        ])->save();
+            $attempt = $lockedRun->started_at !== null
+                ? max($this->attempts(), $lockedRun->attempt + 1)
+                : max($this->attempts(), $lockedRun->attempt);
+
+            $lockedRun->forceFill([
+                'status' => AsyncJobStatus::Running,
+                'attempt' => $attempt,
+                'started_at' => now(),
+                'finished_at' => null,
+                'error_code' => null,
+                'error_message' => null,
+            ])->save();
+
+            return $lockedRun;
+        });
+
+        if ($run === null) {
+            return;
+        }
 
         event(new AsyncJobStatusUpdated($run));
 

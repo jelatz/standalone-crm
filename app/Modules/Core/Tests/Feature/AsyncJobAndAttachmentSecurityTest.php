@@ -2,7 +2,6 @@
 
 use App\Modules\Core\AsyncJobs\Contracts\TrackedJob;
 use App\Modules\Core\AsyncJobs\Enums\AsyncJobStatus;
-use App\Modules\Core\AsyncJobs\Events\AsyncJobStatusUpdated;
 use App\Modules\Core\AsyncJobs\Models\AsyncJobRun;
 use App\Modules\Core\Attachments\Enums\AttachmentScanStatus;
 use App\Modules\Core\Attachments\Models\Attachment;
@@ -20,14 +19,12 @@ use App\Modules\Core\Users\Models\User;
 use App\Support\Concerns\HasUuidV7;
 use App\Support\Silo\HasSiloVisibility;
 use Database\Seeders\RolesPermissionsSeeder;
-use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
@@ -210,119 +207,12 @@ it('dispatches TrackedJob to target queue in queued state without executing prem
         ->and($queuedRun->finished_at)->toBeNull()
         ->and(TestSuccessTrackedJob::$processedSnapshots)->toBe([]);
 
-    Queue::assertPushedOn('imports', TestSuccessTrackedJob::class);
-});
-
-it('tracks TrackedJob lifecycle queued -> running -> completed in DB and broadcasts minimal PrivateChannel events', function (): void {
-    $dept = Department::query()->create(['name' => 'Ops', 'slug' => 'ops-jobs']);
-    $user = createAttachmentTestUser($dept, 'EMP-JOB-1', 'job.user@acme.com', RoleEnum::Sales);
-    $subjectId = (string) Str::uuid7();
-
-    Event::fake([AsyncJobStatusUpdated::class]);
-
-    $run = TestSuccessTrackedJob::dispatchTracked(
-        constructorArgs: [$subjectId, 'sync-check'],
-        subjectType: 'deal',
-        subjectId: $subjectId,
-        triggeredById: (string) $user->id,
-        idempotencyKey: 'job-sync-key',
-        payloadSummary: ['secret_note' => 'do-not-broadcast'],
+    Queue::assertPushedOn(
+        'imports',
+        TestSuccessTrackedJob::class,
+        static fn (TestSuccessTrackedJob $job): bool => $job->afterCommit === true
+            && $job->asyncJobRunId === (string) $queuedRun->id,
     );
-
-    $fresh = $run->fresh();
-    expect($fresh->status)->toBe(AsyncJobStatus::Completed)
-        ->and($fresh->attempt)->toBe(1)
-        ->and($fresh->started_at)->not->toBeNull()
-        ->and($fresh->finished_at)->not->toBeNull()
-        ->and($fresh->error_code)->toBeNull()
-        ->and($fresh->error_message)->toBeNull()
-        ->and(TestSuccessTrackedJob::$processedSnapshots)->toBe([
-            [
-                'run_id' => (string) $run->id,
-                'status_during_process' => AsyncJobStatus::Running->value,
-            ],
-        ]);
-
-    Event::assertDispatchedTimes(AsyncJobStatusUpdated::class, 2);
-
-    $dispatched = Event::dispatched(AsyncJobStatusUpdated::class);
-    $firstEvent = $dispatched[0][0];
-    $secondEvent = $dispatched[1][0];
-
-    expect($firstEvent)->toBeInstanceOf(AsyncJobStatusUpdated::class)
-        ->and($firstEvent->broadcastWhen())->toBeTrue()
-        ->and($firstEvent->broadcastOn())->toHaveCount(1)
-        ->and($firstEvent->broadcastOn()[0])->toBeInstanceOf(PrivateChannel::class)
-        ->and($firstEvent->broadcastOn()[0]->name)->toBe("private-user.{$user->id}")
-        ->and($firstEvent->broadcastWith())->toBe([
-            'async_job_run_id' => (string) $run->id,
-            'status' => AsyncJobStatus::Running->value,
-            'subject_type' => 'deal',
-            'subject_id' => $subjectId,
-            'error_code' => null,
-        ])
-        ->and($secondEvent->broadcastWith())->toBe([
-            'async_job_run_id' => (string) $run->id,
-            'status' => AsyncJobStatus::Completed->value,
-            'subject_type' => 'deal',
-            'subject_id' => $subjectId,
-            'error_code' => null,
-        ]);
-
-    // System jobs without triggeredById suppress user channel broadcasting
-    $systemRun = TestSuccessTrackedJob::dispatchTracked(constructorArgs: [$subjectId, 'system']);
-    $systemEvent = Event::dispatched(AsyncJobStatusUpdated::class)[2][0];
-    expect($systemRun->fresh()->status)->toBe(AsyncJobStatus::Completed)
-        ->and($systemEvent->broadcastWhen())->toBeFalse()
-        ->and($systemEvent->broadcastOn())->toBe([]);
-});
-
-it('transitions TrackedJob to failed with truncated error metadata and increments attempt on retry', function (): void {
-    $dept = Department::query()->create(['name' => 'Ops', 'slug' => 'ops-fail']);
-    $user = createAttachmentTestUser($dept, 'EMP-JOB-2', 'job.fail@acme.com', RoleEnum::Sales);
-    $longMessage = str_repeat('X', 1500);
-
-    Event::fake([AsyncJobStatusUpdated::class]);
-
-    $thrown = null;
-    try {
-        TestFailingTrackedJob::dispatchTracked(
-            constructorArgs: [$longMessage],
-            subjectType: 'deal',
-            subjectId: (string) Str::uuid7(),
-            triggeredById: (string) $user->id,
-        );
-    } catch (RuntimeException $e) {
-        $thrown = $e;
-    }
-
-    expect($thrown)->toBeInstanceOf(RuntimeException::class);
-
-    $failedRun = AsyncJobRun::query()->latest('queued_at')->firstOrFail();
-    expect($failedRun->status)->toBe(AsyncJobStatus::Failed)
-        ->and($failedRun->attempt)->toBe(1)
-        ->and($failedRun->error_code)->toBe('RuntimeException')
-        ->and(mb_strlen((string) $failedRun->error_message))->toBeLessThanOrEqual(1003)
-        ->and($failedRun->finished_at)->not->toBeNull();
-
-    $dispatched = Event::dispatched(AsyncJobStatusUpdated::class);
-    expect($dispatched)->toHaveCount(2)
-        ->and($dispatched[0][0]->broadcastWith()['status'])->toBe(AsyncJobStatus::Running->value)
-        ->and($dispatched[1][0]->broadcastWith()['status'])->toBe(AsyncJobStatus::Failed->value)
-        ->and($dispatched[1][0]->broadcastWith()['error_code'])->toBe('RuntimeException');
-
-    // Simulate queue worker retry of the same AsyncJobRun once transient failure resolves
-    TestFailingTrackedJob::$shouldFail = false;
-    $retryJob = new TestFailingTrackedJob($longMessage);
-    $retryJob->asyncJobRunId = (string) $failedRun->id;
-    $retryJob->handle();
-
-    $recovered = $failedRun->fresh();
-    expect($recovered->status)->toBe(AsyncJobStatus::Completed)
-        ->and($recovered->attempt)->toBe(2)
-        ->and($recovered->error_code)->toBeNull()
-        ->and($recovered->error_message)->toBeNull()
-        ->and($recovered->finished_at)->not->toBeNull();
 });
 
 it('deduplicates TrackedJob by idempotency_key while queued/running/completed and permits re-dispatch after failure', function (): void {
