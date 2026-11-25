@@ -5,10 +5,10 @@ namespace App\Providers;
 use App\Modules\Core\AsyncJobs\Models\AsyncJobRun;
 use App\Modules\Core\Attachments\Models\Attachment;
 use App\Modules\Core\Attachments\Policies\AttachmentPolicy;
-use App\Modules\Core\Auth\Models\OauthIdentity;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\Team;
 use App\Modules\Core\Users\Models\User;
+use App\Modules\Core\Users\Policies\UserPolicy;
 use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -42,9 +42,6 @@ class ModularDomainServiceProvider extends ServiceProvider
         if (class_exists(Team::class)) {
             $morphMap['team'] = Team::class;
         }
-        if (class_exists(OauthIdentity::class)) {
-            $morphMap['oauth_identity'] = OauthIdentity::class;
-        }
         if (class_exists(Attachment::class)) {
             $morphMap['attachment'] = Attachment::class;
         }
@@ -61,6 +58,7 @@ class ModularDomainServiceProvider extends ServiceProvider
     {
         $policies = [
             Attachment::class => AttachmentPolicy::class,
+            User::class => UserPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

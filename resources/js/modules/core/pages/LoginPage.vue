@@ -1,62 +1,52 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { Head, usePage } from '@inertiajs/vue3';
-import { AlertCircle, ShieldCheck } from 'lucide-vue-next';
+import { Head, useForm } from '@inertiajs/vue3';
+import { AlertCircle, Eye, EyeOff, LockKeyhole } from 'lucide-vue-next';
+import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
+import { useAccessibleFormValidation } from '@/utils/formAccessibility';
 
 defineOptions({
     layout: () => null,
 });
 
-interface LoginPageProps {
-    errors?: {
-        sso?: string | string[];
-    };
-    [key: string]: unknown;
-}
+const formRef = ref<HTMLFormElement | null>(null);
+const showPassword = ref(false);
 
-const props = withDefaults(
-    defineProps<{
-        providers?: {
-            google?: boolean;
-            microsoft?: boolean;
-        };
-    }>(),
-    {
-        providers: () => ({
-            google: true,
-            microsoft: true,
-        }),
-    },
-);
-
-const page = usePage<LoginPageProps>();
-const redirectingProvider = ref<'google' | 'microsoft' | null>(null);
-
-const googleEnabled = computed(() => props.providers?.google !== false);
-const microsoftEnabled = computed(() => props.providers?.microsoft !== false);
-
-const ssoError = computed<string | null>(() => {
-    const raw = page.props?.errors?.sso;
-
-    if (Array.isArray(raw)) {
-        return raw[0] ?? null;
-    }
-
-    return typeof raw === 'string' && raw.trim() !== '' ? raw : null;
+const form = useForm({
+    email: '',
+    password: '',
+    remember: false,
 });
 
-function handleProviderClick(provider: 'google' | 'microsoft', event: MouseEvent): void {
-    if (redirectingProvider.value !== null) {
-        event.preventDefault();
-        return;
+useAccessibleFormValidation(formRef);
+
+const topLevelError = computed<string | null>(() => {
+    const emailErr = form.errors.email;
+    const passwordErr = form.errors.password;
+
+    if (typeof emailErr === 'string' && emailErr.trim() !== '') {
+        return emailErr;
     }
 
-    redirectingProvider.value = provider;
+    if (typeof passwordErr === 'string' && passwordErr.trim() !== '') {
+        return passwordErr;
+    }
+
+    return null;
+});
+
+function submit(): void {
+    form.post('/login', {
+        onFinish: () => {
+            form.reset('password');
+        },
+    });
 }
 </script>
 
 <template>
-    <Head title="Sign in" />
+    <Head title="Sign In" />
 
     <div class="flex min-h-screen flex-col items-center justify-center bg-canvas px-4 py-8 text-primary">
         <main class="w-full max-w-[400px] rounded-[8px] border border-default bg-surface p-6">
@@ -65,97 +55,124 @@ function handleProviderClick(provider: 'google' | 'microsoft', event: MouseEvent
                     class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-default bg-subtle font-mono text-[12px] font-semibold text-primary"
                     aria-hidden="true"
                 >
-                    W
+                    C
                 </span>
                 <div>
                     <h1 class="text-[18px] font-semibold leading-6 tracking-[-0.02em] text-primary">
-                        Workspace Sign In
+                        Standalone CRM
                     </h1>
                     <p class="text-[12px] leading-4 text-secondary">
-                        Internal Enterprise Operations Platform
+                        Sign in to your operational account
                     </p>
                 </div>
             </div>
 
-            <p class="mt-4 text-[13px] leading-5 text-secondary">
-                Sign in with your corporate directory account to access CRM pipelines, project handoffs, internal chat, and shared mail triage.
-            </p>
-
             <div
-                v-if="ssoError"
+                v-if="topLevelError"
                 role="alert"
-                data-testid="sso-error-banner"
+                data-testid="login-error-banner"
                 class="mt-4 flex items-start gap-2 rounded-[6px] border border-status-danger/30 bg-status-danger/10 px-3 py-2.5 text-[13px] leading-5 text-status-danger"
             >
                 <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" :stroke-width="1.75" aria-hidden="true" />
-                <span>{{ ssoError }}</span>
+                <span>{{ topLevelError }}</span>
             </div>
 
-            <div
-                v-if="!googleEnabled && !microsoftEnabled"
-                role="alert"
-                class="mt-4 flex items-start gap-2 rounded-[6px] border border-status-danger/30 bg-status-danger/10 px-3 py-2.5 text-[13px] leading-5 text-status-danger"
+            <form
+                ref="formRef"
+                class="mt-5 space-y-4"
+                @submit.prevent="submit"
             >
-                <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" :stroke-width="1.75" aria-hidden="true" />
-                <span>No single sign-on providers are currently enabled. Contact IT Operations.</span>
-            </div>
+                <div class="space-y-1">
+                    <label for="email" class="block text-[12px] font-medium text-primary">
+                        Email address
+                    </label>
+                    <Input
+                        id="email"
+                        v-model="form.email"
+                        name="email"
+                        type="email"
+                        autocomplete="username"
+                        :spellcheck="false"
+                        enterkeyhint="next"
+                        placeholder="superadmin@example.com"
+                        data-error="email-client-error"
+                        :error-message="form.errors.email"
+                        required
+                    />
+                    <p
+                        id="email-client-error"
+                        class="hidden text-[12px] text-status-danger [:has(#email:user-invalid)_&]:block [:has(#email.user-invalid-fallback)_&]:block"
+                    >
+                        Enter a valid email address in the format name@example.com.
+                    </p>
+                </div>
 
-            <div class="mt-5 space-y-2.5">
-                <a
-                    v-if="googleEnabled"
-                    href="/auth/google/redirect"
-                    data-testid="sso-google-link"
-                    :aria-disabled="redirectingProvider !== null ? 'true' : undefined"
-                    class="flex h-9 w-full items-center justify-center gap-2.5 rounded-[6px] bg-accent-primary px-3 text-[13px] font-medium text-accent-contrast transition-colors duration-150 ease-out hover:bg-accent-hover"
-                    @click="handleProviderClick('google', $event)"
-                >
-                    <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                            fill="currentColor"
-                            d="M21.8 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.5c-.2 1.2-1 2.3-2.1 3v2.5h3.4c2-1.8 3-4.5 3-7.3Z"
-                        />
-                        <path
-                            fill="currentColor"
-                            d="M12 22c2.7 0 5-.9 6.7-2.5l-3.4-2.5c-.9.6-2.1 1-3.3 1-2.6 0-4.8-1.7-5.6-4.1H2.9v2.6C4.6 19.8 8 22 12 22Z"
-                        />
-                        <path
-                            fill="currentColor"
-                            d="M6.4 13.9c-.2-.6-.3-1.2-.3-1.9s.1-1.3.3-1.9V7.5H2.9C2.3 8.9 2 10.4 2 12s.3 3.1.9 4.5l3.5-2.6Z"
-                        />
-                        <path
-                            fill="currentColor"
-                            d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9C17 3 14.7 2 12 2 8 2 4.6 4.2 2.9 7.5l3.5 2.6C7.2 7.7 9.4 6 12 6Z"
-                        />
-                    </svg>
-                    <span>
-                        {{ redirectingProvider === 'google' ? 'Redirecting to Google Workspace...' : 'Sign in with Google Workspace' }}
-                    </span>
-                </a>
+                <div class="space-y-1">
+                    <div class="flex items-center justify-between gap-2">
+                        <label for="password" class="block text-[12px] font-medium text-primary">
+                            Password
+                        </label>
+                        <button
+                            type="button"
+                            data-testid="toggle-password-visibility"
+                            :aria-pressed="showPassword ? 'true' : 'false'"
+                            class="inline-flex items-center gap-1 text-[11px] font-medium text-secondary hover:text-primary cursor-pointer"
+                            @click="showPassword = !showPassword"
+                        >
+                            <EyeOff v-if="showPassword" class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
+                            <Eye v-else class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
+                            <span>{{ showPassword ? 'Hide password' : 'Show password' }}</span>
+                        </button>
+                    </div>
+                    <Input
+                        id="password"
+                        v-model="form.password"
+                        name="password"
+                        :type="showPassword ? 'text' : 'password'"
+                        autocomplete="current-password"
+                        enterkeyhint="done"
+                        placeholder="Enter your password"
+                        data-error="password-client-error"
+                        :error-message="form.errors.password"
+                        required
+                    />
+                    <p
+                        id="password-client-error"
+                        class="hidden text-[12px] text-status-danger [:has(#password:user-invalid)_&]:block [:has(#password.user-invalid-fallback)_&]:block"
+                    >
+                        Enter your password to sign in.
+                    </p>
+                </div>
 
-                <a
-                    v-if="microsoftEnabled"
-                    href="/auth/microsoft/redirect"
-                    data-testid="sso-microsoft-link"
-                    :aria-disabled="redirectingProvider !== null ? 'true' : undefined"
-                    class="flex h-9 w-full items-center justify-center gap-2.5 rounded-[6px] border border-default bg-surface px-3 text-[13px] font-medium text-primary transition-colors duration-150 ease-out hover:bg-subtle"
-                    @click="handleProviderClick('microsoft', $event)"
+                <div class="flex items-center gap-2">
+                    <input
+                        id="remember"
+                        v-model="form.remember"
+                        name="remember"
+                        type="checkbox"
+                        class="h-3.5 w-3.5 rounded-[4px] border border-default accent-accent-primary cursor-pointer"
+                    />
+                    <label for="remember" class="text-[12px] text-secondary select-none cursor-pointer">
+                        Keep me signed in on this device
+                    </label>
+                </div>
+
+                <Button
+                    type="submit"
+                    variant="primary"
+                    size="md"
+                    data-testid="login-submit"
+                    :loading="form.processing"
+                    class="w-full"
                 >
-                    <svg class="h-4 w-4 shrink-0" viewBox="0 0 21 21" aria-hidden="true">
-                        <rect x="1" y="1" width="9" height="9" fill="currentColor" opacity="0.85" />
-                        <rect x="11" y="1" width="9" height="9" fill="currentColor" opacity="0.65" />
-                        <rect x="1" y="11" width="9" height="9" fill="currentColor" opacity="0.65" />
-                        <rect x="11" y="11" width="9" height="9" fill="currentColor" opacity="0.85" />
-                    </svg>
-                    <span>
-                        {{ redirectingProvider === 'microsoft' ? 'Redirecting to Microsoft 365...' : 'Sign in with Microsoft 365' }}
-                    </span>
-                </a>
-            </div>
+                    Sign In
+                </Button>
+            </form>
 
             <div class="mt-5 flex items-start gap-2 border-t border-default pt-4 text-[12px] leading-4 text-muted">
-                <ShieldCheck class="mt-0.5 h-3.5 w-3.5 shrink-0 text-secondary" :stroke-width="1.75" aria-hidden="true" />
+                <LockKeyhole class="mt-0.5 h-3.5 w-3.5 shrink-0 text-secondary" :stroke-width="1.75" aria-hidden="true" />
                 <span>
-                    Access requires an active employee record in the corporate directory. Contact IT Operations for role or tenant access issues.
+                    Accounts are provisioned by your Superadmin. Contact system administration if you need access.
                 </span>
             </div>
         </main>

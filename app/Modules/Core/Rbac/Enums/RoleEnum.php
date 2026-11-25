@@ -7,6 +7,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 #[TypeScript]
 enum RoleEnum: string
 {
+    case Superadmin = 'superadmin';
     case Admin = 'admin';
     case Director = 'director';
     case OperationsManager = 'operations_manager';

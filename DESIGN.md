@@ -97,3 +97,5 @@ Use **1 neutral scale (Cool Zinc)**, **1 primary accent (Deep Cobalt)**, and sem
 - **Stitch Project ID:** `17521671229474955745`
 - **Locked Design System Asset:** `assets/ef1c31b1c96b4ae99131142a2a6ba0c4`
 - **Generated Shell Reference Screen:** `projects/17521671229474955745/screens/74207f5bb8e246ae818aefd123b7c228` (*Operational Overview* — 240px persistent left rail with `Cmd+K` trigger, grouped navigation, amber Handoff Intake counter, Chat/Shared Inbox unread badges, static 6px Live status footer, 44px top bar, 4-column hairline KPI strip, 32px row density table, and bottom-right docked `Drafts` tray)
+- **Generated Sign In Reference Screen:** `projects/17521671229474955745/screens/b6e69e160b8746ff8102b51da9f7ff00` (*Standalone CRM — Sign In* — centered 400px card, C badge, email/password inputs with Show toggle, remember me, solid `#1D4ED8` Sign In CTA)
+- **Generated User Management Reference Screen:** `projects/17521671229474955745/screens/ed10da4e68b8426fb799c8cbb2ca9f63` (*Superadmin User Management* — 32px density user table + Create User modal dialog)

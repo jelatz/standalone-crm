@@ -31,6 +31,7 @@ class UserFactory extends Factory
             'employee_code' => 'EMP-'.strtoupper(substr(str_replace('-', '', (string) Str::uuid7()), -10)),
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
+            'password' => 'Password123!',
             'department_id' => static fn (): string => (string) Department::query()->firstOrCreate(
                 ['slug' => 'general'],
                 ['name' => 'General'],

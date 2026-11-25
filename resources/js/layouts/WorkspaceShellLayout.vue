@@ -20,6 +20,7 @@ import {
     Search,
     Sun,
     Trash2,
+    UserCog,
     Users,
     X,
 } from 'lucide-vue-next';
@@ -140,13 +141,35 @@ const navGroups: NavGroup[] = [
     },
 ];
 
-const allNavItems = navGroups.flatMap((group) => group.items);
-
 const page = usePage<WorkspacePageProps>();
 const authStore = useAuthStore();
 const realtimeStore = useRealtimeStore();
 const unreadsStore = useUnreadsStore();
 const draftsStore = useDraftsStore();
+
+const visibleNavGroups = computed<NavGroup[]>(() => {
+    if (authStore.hasRole('superadmin') && authStore.hasPermission('admin.users')) {
+        return [
+            ...navGroups,
+            {
+                label: 'Admin',
+                items: [
+                    {
+                        key: 'admin.users',
+                        label: 'Users',
+                        href: '/app/admin/users',
+                        icon: UserCog,
+                        keywords: 'admin users accounts roles permissions superadmin',
+                    },
+                ],
+            },
+        ];
+    }
+
+    return navGroups;
+});
+
+const allNavItems = computed(() => visibleNavGroups.value.flatMap((group) => group.items));
 
 const isMobileNavOpen = ref(false);
 const isCommandOpen = ref(false);
@@ -197,7 +220,7 @@ const activePageTitle = computed(() => {
         return propTitle;
     }
 
-    const activeItem = allNavItems.find((item) => isNavItemActive(item.href));
+    const activeItem = allNavItems.value.find((item) => isNavItemActive(item.href));
     return activeItem?.label ?? 'Operational Overview';
 });
 
@@ -218,13 +241,13 @@ const userInitials = computed(() => {
     const name = authStore.user?.name?.trim();
 
     if (!name) {
-        return 'WS';
+        return 'CR';
     }
 
     const parts = name.split(/\s+/);
     const first = parts[0]?.charAt(0) ?? '';
     const last = parts.length > 1 ? parts[parts.length - 1].charAt(0) : '';
-    return (first + last).toUpperCase() || 'WS';
+    return (first + last).toUpperCase() || 'CR';
 });
 
 const connectionMeta = computed(() => {
@@ -254,10 +277,10 @@ const filteredCommandItems = computed(() => {
     const query = commandQuery.value.trim().toLowerCase();
 
     if (query === '') {
-        return allNavItems;
+        return allNavItems.value;
     }
 
-    return allNavItems.filter(
+    return allNavItems.value.filter(
         (item) =>
             item.label.toLowerCase().includes(query) ||
             item.href.toLowerCase().includes(query) ||
@@ -416,7 +439,7 @@ onUnmounted(() => {
 
         <!-- Persistent 240px Desktop Rail / Mobile Slide-over Drawer -->
         <aside
-            aria-label="Workspace navigation"
+            aria-label="CRM navigation"
             :class="[
                 'flex-col border-r border-default bg-subtle',
                 isMobileNavOpen
@@ -431,10 +454,10 @@ onUnmounted(() => {
                         class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border border-default bg-surface font-mono text-[11px] font-semibold text-primary"
                         aria-hidden="true"
                     >
-                        W
+                        C
                     </span>
                     <span class="truncate text-[13px] font-semibold tracking-[-0.01em] text-primary">
-                        Workspace
+                        Standalone CRM
                     </span>
                 </div>
                 <div class="flex items-center gap-1.5">
@@ -463,7 +486,7 @@ onUnmounted(() => {
                 >
                     <span class="flex items-center gap-2 truncate">
                         <Search class="h-3.5 w-3.5 shrink-0 text-secondary" :stroke-width="1.75" aria-hidden="true" />
-                        <span class="truncate">Search workspace</span>
+                        <span class="truncate">Search CRM</span>
                     </span>
                     <kbd
                         class="shrink-0 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-secondary"
@@ -475,7 +498,7 @@ onUnmounted(() => {
 
             <!-- Grouped Navigation -->
             <nav aria-label="Primary sections" class="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
-                <div v-for="group in navGroups" :key="group.label">
+                <div v-for="group in visibleNavGroups" :key="group.label">
                     <p class="mb-1 px-2 text-[11px] font-medium uppercase tracking-wider text-secondary">
                         {{ group.label }}
                     </p>
@@ -527,10 +550,10 @@ onUnmounted(() => {
                     </span>
                     <div class="min-w-0 flex-1">
                         <p class="truncate text-[12px] font-medium leading-4 text-primary">
-                            {{ authStore.user?.name ?? 'Workspace Member' }}
+                            {{ authStore.user?.name ?? 'Local Operator' }}
                         </p>
                         <p class="truncate text-[11px] leading-4 text-secondary">
-                            {{ authStore.user?.email ?? 'session@company.internal' }}
+                            {{ authStore.user?.email ?? 'local@standalone-crm.local' }}
                         </p>
                     </div>
                 </div>
@@ -548,6 +571,7 @@ onUnmounted(() => {
                     </div>
 
                     <Button
+                        v-if="authStore.isAuthenticated"
                         variant="ghost"
                         size="sm"
                         :loading="signingOut"
@@ -561,7 +585,7 @@ onUnmounted(() => {
             </div>
         </aside>
 
-        <!-- Main Workspace Column -->
+        <!-- Main CRM Column -->
         <div class="flex min-w-0 flex-1 flex-col">
             <!-- 44px Compact Top Bar -->
             <header
@@ -625,14 +649,14 @@ onUnmounted(() => {
         <Dialog
             :open="isCommandOpen"
             title="Command Palette"
-            description="Jump directly to workspace modules or clear filter to inspect available destinations."
+            description="Jump directly to CRM modules or clear filter to inspect available destinations."
             max-width-class="max-w-xl"
             @update:open="handleCommandOpenChange"
         >
             <div class="space-y-3" data-testid="command-palette-dialog">
                 <div>
                     <label for="workspace-command-search" class="sr-only">
-                        Search workspace views and records
+                        Search CRM views and records
                     </label>
                     <Input
                         id="workspace-command-search"
@@ -646,7 +670,7 @@ onUnmounted(() => {
                     v-if="isCommandSearching"
                     class="rounded-[6px] border border-default bg-subtle px-3 py-4 text-[12px] text-secondary"
                 >
-                    Searching indexed workspace views...
+                    Searching indexed CRM views...
                 </div>
 
                 <div
@@ -667,7 +691,7 @@ onUnmounted(() => {
                 <ul
                     v-else
                     role="listbox"
-                    aria-label="Workspace destinations"
+                    aria-label="CRM destinations"
                     class="divide-y divide-default rounded-[6px] border border-default bg-surface"
                 >
                     <li v-for="item in filteredCommandItems" :key="item.key">

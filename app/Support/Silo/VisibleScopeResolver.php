@@ -20,7 +20,7 @@ class VisibleScopeResolver
             );
         }
 
-        if ($viewer->hasRole(RoleEnum::Admin->value)) {
+        if ($viewer->hasAnyRole([RoleEnum::Superadmin->value, RoleEnum::Admin->value])) {
             return new VisibleScope(
                 viewer: $viewer,
                 isUnrestrictedAdmin: true,

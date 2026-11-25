@@ -20,6 +20,8 @@ class RolesPermissionsSeeder extends Seeder
             Permission::findOrCreate($permission->value, 'web');
         }
 
+        $registrar->forgetCachedPermissions();
+
         $matrix = $this->rolePermissionsMatrix();
 
         foreach (RoleEnum::cases() as $roleEnum) {
@@ -41,6 +43,7 @@ class RolesPermissionsSeeder extends Seeder
     protected function rolePermissionsMatrix(): array
     {
         return [
+            RoleEnum::Superadmin->value => PermissionEnum::cases(),
             RoleEnum::Admin->value => PermissionEnum::cases(),
 
             RoleEnum::Director->value => [

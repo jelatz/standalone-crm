@@ -10,6 +10,12 @@ const props = withDefaults(
         name?: string;
         placeholder?: string;
         autocomplete?: string;
+        spellcheck?: boolean;
+        enterkeyhint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send';
+        required?: boolean;
+        minlength?: number;
+        pattern?: string;
+        dataError?: string;
         disabled?: boolean;
         invalid?: boolean;
         errorMessage?: string;
@@ -23,6 +29,12 @@ const props = withDefaults(
         name: undefined,
         placeholder: '',
         autocomplete: undefined,
+        spellcheck: undefined,
+        enterkeyhint: undefined,
+        required: false,
+        minlength: undefined,
+        pattern: undefined,
+        dataError: undefined,
         disabled: false,
         invalid: false,
         errorMessage: '',
@@ -51,7 +63,7 @@ const ariaDescribedBy = computed(() => {
 
 const inputClasses = computed(() =>
     twMerge(
-        'h-8 w-full rounded-[6px] border bg-surface px-2.5 text-[13px] text-primary placeholder:text-muted transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent-primary disabled:cursor-not-allowed disabled:opacity-50',
+        'h-8 w-full rounded-[6px] border bg-surface px-2.5 text-[13px] text-primary placeholder:text-muted transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent-primary user-invalid:border-status-danger disabled:cursor-not-allowed disabled:opacity-50',
         isInvalid.value ? 'border-status-danger' : 'border-default',
         props.class,
     ),
@@ -72,8 +84,14 @@ function handleInput(event: Event): void {
             :value="props.modelValue"
             :placeholder="props.placeholder"
             :autocomplete="props.autocomplete"
+            :spellcheck="props.spellcheck"
+            :enterkeyhint="props.enterkeyhint"
+            :required="props.required"
+            :minlength="props.minlength"
+            :pattern="props.pattern"
+            :data-error="props.dataError"
             :disabled="props.disabled"
-            :aria-invalid="isInvalid ? 'true' : undefined"
+            :aria-invalid="isInvalid ? 'true' : 'false'"
             :aria-describedby="ariaDescribedBy"
             :class="inputClasses"
             @input="handleInput"

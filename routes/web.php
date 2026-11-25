@@ -53,7 +53,7 @@ Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function ()
     Route::inertia('/email', 'core/pages/ModulePlaceholderPage', [
         'moduleKey' => 'email.index',
         'moduleTitle' => 'Shared & Personal Inbox',
-        'moduleDescription' => 'Google Workspace and Microsoft 365 triage queues and RFC 5322 threads (Phase 4).',
+        'moduleDescription' => 'Shared and personal inbox triage queues and RFC 5322 threads (Phase 4).',
         'phaseLabel' => 'Phase 4',
     ])->name('email.index');
 });

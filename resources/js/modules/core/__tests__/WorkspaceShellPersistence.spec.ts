@@ -84,6 +84,25 @@ vi.mock('@inertiajs/vue3', async () => {
         Link: LinkStub,
         Head: HeadStub,
         usePage: () => reactivePage,
+        useForm: <T extends Record<string, unknown>>(initialValues: T) => {
+            const formState = vue.reactive({
+                ...initialValues,
+                errors: {} as Record<string, string>,
+                processing: false,
+                post: mockRouterPost,
+                reset: (...fields: string[]) => {
+                    const targets = fields.length > 0 ? fields : Object.keys(initialValues);
+                    for (const field of targets) {
+                        (formState as Record<string, unknown>)[field] = initialValues[field];
+                    }
+                },
+                clearErrors: () => {
+                    formState.errors = {};
+                },
+            });
+
+            return formState;
+        },
         router: {
             visit: mockRouterVisit,
             post: mockRouterPost,
@@ -94,6 +113,7 @@ vi.mock('@inertiajs/vue3', async () => {
 import WorkspaceShellLayout from '@/layouts/WorkspaceShellLayout.vue';
 import LoginPage from '@/modules/core/pages/LoginPage.vue';
 import ModulePlaceholderPage from '@/modules/core/pages/ModulePlaceholderPage.vue';
+import UsersPage from '@/modules/core/pages/UsersPage.vue';
 import WorkspaceHomePage from '@/modules/core/pages/WorkspaceHomePage.vue';
 
 function makeUser(): App.Modules.Core.Auth.Data.AuthenticatedUserData {
@@ -314,49 +334,6 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         expect(document.body.querySelector('[data-testid="command-palette-dialog"]')).not.toBeNull();
     });
 
-    it('renders LoginPage with Google Workspace & Microsoft 365 links and role="alert" SSO errors', () => {
-        mockPage.url = '/login';
-        mockPage.component = 'core/pages/LoginPage';
-        mockPage.props = {
-            auth: { user: null },
-            errors: {
-                sso: 'Your corporate directory account is suspended or not provisioned.',
-            },
-        };
-
-        const loginLayout = (LoginPage as { layout?: () => unknown }).layout;
-        expect(typeof loginLayout).toBe('function');
-        expect(loginLayout?.()).toBeNull();
-
-        const wrapper = mount(LoginPage, {
-            attachTo: document.body,
-            props: {
-                providers: {
-                    google: true,
-                    microsoft: true,
-                },
-            },
-        });
-        mountedWrappers.push(wrapper);
-
-        const googleLink = wrapper.get('[data-testid="sso-google-link"]');
-        const microsoftLink = wrapper.get('[data-testid="sso-microsoft-link"]');
-
-        expect(googleLink.element.tagName).toBe('A');
-        expect(googleLink.attributes('href')).toBe('/auth/google/redirect');
-        expect(googleLink.text()).toContain('Sign in with Google Workspace');
-
-        expect(microsoftLink.element.tagName).toBe('A');
-        expect(microsoftLink.attributes('href')).toBe('/auth/microsoft/redirect');
-        expect(microsoftLink.text()).toContain('Sign in with Microsoft 365');
-
-        const alertBanner = wrapper.get('[data-testid="sso-error-banner"]');
-        expect(alertBanner.attributes('role')).toBe('alert');
-        expect(alertBanner.text()).toContain(
-            'Your corporate directory account is suspended or not provisioned.',
-        );
-    });
-
     it('renders WorkspaceHomePage operational overview plus loading, empty, and error states', async () => {
         const readyWrapper = mount(WorkspaceHomePage, {
             attachTo: document.body,
@@ -398,6 +375,103 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         const errorState = errorWrapper.get('[data-testid="overview-error-state"]');
         expect(errorState.attributes('role')).toBe('alert');
         expect(errorState.text()).toContain('Upstream queue unavailable.');
+    });
+
+    it('renders LoginPage with email/password autofill, show-password toggle, and role="alert" error banner', async () => {
+        const loginLayout = (LoginPage as { layout?: () => unknown }).layout;
+        expect(typeof loginLayout).toBe('function');
+        expect(loginLayout?.()).toBeNull();
+
+        const wrapper = mount(LoginPage, {
+            attachTo: document.body,
+        });
+        mountedWrappers.push(wrapper);
+
+        const emailInput = wrapper.get('input#email');
+        const passwordInput = wrapper.get('input#password');
+
+        expect(emailInput.attributes('type')).toBe('email');
+        expect(emailInput.attributes('autocomplete')).toBe('username');
+        expect(emailInput.attributes('spellcheck')).toBe('false');
+        expect(passwordInput.attributes('type')).toBe('password');
+        expect(passwordInput.attributes('autocomplete')).toBe('current-password');
+
+        await wrapper.get('[data-testid="toggle-password-visibility"]').trigger('click');
+        expect(wrapper.get('input#password').attributes('type')).toBe('text');
+
+        await emailInput.setValue('superadmin@example.com');
+        await passwordInput.setValue('SuperAdmin123!');
+        await wrapper.get('form').trigger('submit');
+        expect(mockRouterPost).toHaveBeenCalledWith(
+            '/login',
+            expect.objectContaining({ onFinish: expect.any(Function) }),
+        );
+    });
+
+    it('renders UsersPage directory and Create User dialog with new-password rules and superadmin-only nav visibility', async () => {
+        const mockEcho = createMockEcho();
+        setEchoInstanceForTesting(mockEcho.client);
+
+        // Regular operations_manager does not see Admin -> Users nav link
+        const standardWrapper = mount(WorkspaceShellLayout, {
+            attachTo: document.body,
+            slots: { default: () => h('div', 'Body') },
+        });
+        mountedWrappers.push(standardWrapper);
+        await nextTick();
+        expect(standardWrapper.find('a[href="/app/admin/users"]').exists()).toBe(false);
+
+        // Superadmin with admin.users sees Admin -> Users nav link
+        mockPage.props.auth = {
+            user: {
+                ...makeUser(),
+                roles: ['superadmin'],
+                permissions: ['admin.users'],
+            },
+        };
+        const superWrapper = mount(WorkspaceShellLayout, {
+            attachTo: document.body,
+            slots: { default: () => h('div', 'Body') },
+        });
+        mountedWrappers.push(superWrapper);
+        await nextTick();
+        expect(superWrapper.find('a[href="/app/admin/users"]').exists()).toBe(true);
+
+        const usersWrapper = mount(UsersPage, {
+            attachTo: document.body,
+            props: {
+                users: [
+                    {
+                        id: 'usr-0',
+                        employee_code: 'EMP-0000',
+                        name: 'Super Admin',
+                        email: 'superadmin@example.com',
+                        job_title: 'Super Administrator',
+                        department_id: 'dept-1',
+                        department_name: 'General',
+                        status: 'active',
+                        roles: ['superadmin'],
+                        created_at: null,
+                    },
+                ],
+                departments: [{ id: 'dept-1', name: 'General' }],
+                roles: [{ value: 'sales', label: 'Sales' }],
+            },
+        });
+        mountedWrappers.push(usersWrapper);
+        expect(usersWrapper.text()).toContain('Super Admin');
+        expect(usersWrapper.text()).toContain('EMP-0000');
+
+        await usersWrapper.get('[data-testid="open-create-user-dialog"]').trigger('click');
+        await flushPromises();
+        await nextTick();
+
+        const newPasswordInput = document.body.querySelector<HTMLInputElement>('#create-user-password');
+        expect(newPasswordInput).not.toBeNull();
+        expect(newPasswordInput?.getAttribute('autocomplete')).toBe('new-password');
+        expect(document.body.textContent).toContain(
+            'At least 8 characters including uppercase, lowercase, number, and symbol.',
+        );
     });
 
     it('enforces auth RBAC helpers, safe Echo fallback without Reverb key, theme toggle, and logout lock', async () => {

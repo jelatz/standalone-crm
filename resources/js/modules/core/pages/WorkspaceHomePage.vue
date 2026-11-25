@@ -327,7 +327,7 @@ function startOperationalDraft(item?: OperationalItem): void {
                         <div>
                             <p class="font-medium">Unable to load operational feed</p>
                             <p class="text-[12px] opacity-90">
-                                {{ loadError || 'The workspace API timed out while fetching recent activity.' }}
+                                {{ loadError || 'The CRM API timed out while fetching recent activity.' }}
                             </p>
                         </div>
                     </div>
@@ -408,7 +408,7 @@ function startOperationalDraft(item?: OperationalItem): void {
             </div>
 
             <!-- Right Pane: Session & Triage Summary -->
-            <aside aria-label="Workspace telemetry summary" class="min-w-0 p-4 space-y-4 lg:col-span-4">
+            <aside aria-label="CRM telemetry summary" class="min-w-0 p-4 space-y-4 lg:col-span-4">
                 <div class="flex items-center justify-between gap-2">
                     <h2 class="text-[14px] font-semibold text-primary">
                         System &amp; Session
@@ -422,7 +422,7 @@ function startOperationalDraft(item?: OperationalItem): void {
                     <div class="flex items-center justify-between gap-2 px-3 py-2">
                         <dt class="text-secondary">Operator</dt>
                         <dd class="truncate font-medium text-primary">
-                            {{ authStore.user?.name ?? 'Authenticated User' }}
+                            {{ authStore.user?.name ?? 'Local Operator' }}
                         </dd>
                     </div>
                     <div class="flex items-center justify-between gap-2 px-3 py-2">

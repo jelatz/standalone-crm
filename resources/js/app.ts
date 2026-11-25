@@ -13,7 +13,7 @@ type InertiaPageModule = {
     default: InertiaPageComponent;
 };
 
-const appName = import.meta.env.VITE_APP_NAME || 'Workspace';
+const appName = import.meta.env.VITE_APP_NAME || 'Standalone CRM';
 
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),

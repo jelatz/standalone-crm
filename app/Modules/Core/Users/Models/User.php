@@ -3,7 +3,6 @@
 namespace App\Modules\Core\Users\Models;
 
 use App\Modules\Core\Auth\Actions\RevokeEmployeeSessionsAction;
-use App\Modules\Core\Auth\Models\OauthIdentity;
 use App\Modules\Core\Rbac\Models\EntityCollaborator;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Support\Concerns\HasUuidV7;
@@ -28,8 +27,6 @@ class User extends Authenticatable
 
     protected string $guard_name = 'web';
 
-    protected $rememberTokenName = '';
-
     /**
      * @var array<string, mixed>
      */
@@ -45,6 +42,7 @@ class User extends Authenticatable
         'employee_code',
         'name',
         'email',
+        'password',
         'avatar_key',
         'department_id',
         'primary_team_id',
@@ -53,6 +51,14 @@ class User extends Authenticatable
         'status',
         'timezone',
         'last_seen_at',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
     ];
 
     protected static function newFactory(): UserFactory
@@ -84,6 +90,7 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'password' => 'hashed',
             'status' => UserStatusEnum::class,
             'last_seen_at' => 'datetime',
         ];
@@ -143,13 +150,5 @@ class User extends Authenticatable
     public function entityCollaborations(): HasMany
     {
         return $this->hasMany(EntityCollaborator::class, 'user_id');
-    }
-
-    /**
-     * @return HasMany<OauthIdentity, $this>
-     */
-    public function oauthIdentities(): HasMany
-    {
-        return $this->hasMany(OauthIdentity::class, 'user_id');
     }
 }
