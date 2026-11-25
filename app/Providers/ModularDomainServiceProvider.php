@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Modules\Core\AsyncJobs\Models\AsyncJobRun;
 use App\Modules\Core\Attachments\Models\Attachment;
 use App\Modules\Core\Attachments\Policies\AttachmentPolicy;
 use App\Modules\Core\Auth\Models\OauthIdentity;
@@ -46,6 +47,9 @@ class ModularDomainServiceProvider extends ServiceProvider
         }
         if (class_exists(Attachment::class)) {
             $morphMap['attachment'] = Attachment::class;
+        }
+        if (class_exists(AsyncJobRun::class)) {
+            $morphMap['async_job_run'] = AsyncJobRun::class;
         }
 
         if ($morphMap !== []) {

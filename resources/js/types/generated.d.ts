@@ -1,6 +1,31 @@
 declare namespace App {
 namespace Modules {
 namespace Core {
+namespace AsyncJobs {
+namespace Enums {
+export type AsyncJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+}
+}
+namespace Attachments {
+namespace Data {
+export type PresignUploadRequestData = {
+filename: string,
+mime_type: string,
+size_bytes: number,
+sha256: string,
+};
+export type PresignUploadResponseData = {
+attachment_id: string,
+upload_url: string,
+headers: Record<string, string>,
+object_key: string,
+expires_at: string,
+};
+}
+namespace Enums {
+export type AttachmentScanStatus = 'pending' | 'clean' | 'quarantined';
+}
+}
 namespace Auth {
 namespace Data {
 export type AuthenticatedUserData = {
