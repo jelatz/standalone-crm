@@ -8,6 +8,7 @@ use App\Modules\Core\Auth\Models\OauthIdentity;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\Team;
 use App\Modules\Core\Users\Models\User;
+use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
@@ -67,8 +68,12 @@ class ModularDomainServiceProvider extends ServiceProvider
 
     protected function registerModuleRoutes(): void
     {
+        if ($this->app instanceof CachesRoutes && $this->app->routesAreCached()) {
+            return;
+        }
+
         foreach (glob(app_path('Modules/*/*/routes.php')) ?: [] as $routeFile) {
-            Route::middleware('web')->group($routeFile);
+            Route::middleware('web')->group(fn () => $this->loadRoutesFrom($routeFile));
         }
     }
 }

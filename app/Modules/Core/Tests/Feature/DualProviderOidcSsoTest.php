@@ -13,6 +13,9 @@ use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\User;
 use Database\Seeders\RolesPermissionsSeeder;
+use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Psr7\Request as Psr7Request;
+use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Cache;
@@ -22,6 +25,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Socialite\Contracts\Factory as SocialiteFactory;
 use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\InvalidStateException;
 use Laravel\Socialite\Two\User as SocialiteTwoUser;
 use SocialiteProviders\Google\Provider as GoogleProvider;
 use SocialiteProviders\Microsoft\Provider as MicrosoftProvider;
@@ -85,6 +89,19 @@ function mockSocialiteCallback(string $provider, SocialiteTwoUser $socialiteUser
 
     $factory = Mockery::mock(SocialiteFactory::class);
     $factory->shouldReceive('driver')->with($provider)->once()->andReturn($mockProvider);
+
+    app()->instance(SocialiteFactory::class, $factory);
+    Socialite::swap($factory);
+}
+
+function mockMicrosoftProviderCallback(SocialiteTwoUser $socialiteUser, ?stdClass $claims): void
+{
+    $mockProvider = Mockery::mock(MicrosoftProvider::class);
+    $mockProvider->shouldReceive('user')->once()->andReturn($socialiteUser);
+    $mockProvider->shouldReceive('getClaims')->once()->andReturn($claims);
+
+    $factory = Mockery::mock(SocialiteFactory::class);
+    $factory->shouldReceive('driver')->with('microsoft')->once()->andReturn($mockProvider);
 
     app()->instance(SocialiteFactory::class, $factory);
     Socialite::swap($factory);
@@ -168,7 +185,7 @@ it('authenticates valid Google Workspace hd login with citext email match, creat
 
     mockSocialiteCallback('google', $socialiteUser);
 
-    $response = $this->get('/auth/google/callback');
+    $response = $this->get('/auth/google/callback?code=oauth-code&state=oauth-state');
 
     $response->assertRedirect('/app');
     $this->assertAuthenticatedAs($user);
@@ -200,7 +217,7 @@ it('rejects consumer gmail accounts, mismatched Google hd claims, and unverified
 
     mockSocialiteCallback('google', $socialiteUser);
 
-    $this->get('/auth/google/callback')->assertForbidden();
+    $this->get('/auth/google/callback?code=oauth-code&state=oauth-state')->assertForbidden();
     $this->assertGuest();
     expect(OauthIdentity::query()->count())->toBe(0);
 })->with([
@@ -242,7 +259,7 @@ it('authenticates valid Microsoft 365 tid login and creates oauth_identities row
 
     mockSocialiteCallback('microsoft', $socialiteUser);
 
-    $this->get('/auth/microsoft/callback')
+    $this->get('/auth/microsoft/callback?code=oauth-code&state=oauth-state')
         ->assertRedirect('/app');
 
     $this->assertAuthenticatedAs($user);
@@ -271,7 +288,7 @@ it('rejects wrong Microsoft tenant tid and Microsoft consumer tenant with 403', 
 
     mockSocialiteCallback('microsoft', $socialiteUser);
 
-    $this->get('/auth/microsoft/callback')->assertForbidden();
+    $this->get('/auth/microsoft/callback?code=oauth-code&state=oauth-state')->assertForbidden();
     $this->assertGuest();
     expect(OauthIdentity::query()->count())->toBe(0);
 })->with([
@@ -297,7 +314,7 @@ it('blocks suspended and offboarded users with 403 even with valid tenant OIDC c
 
     mockSocialiteCallback('google', $socialiteUser);
 
-    $this->get('/auth/google/callback')->assertForbidden();
+    $this->get('/auth/google/callback?code=oauth-code&state=oauth-state')->assertForbidden();
     $this->assertGuest();
     expect(OauthIdentity::query()->count())->toBe(0);
 })->with([
@@ -392,7 +409,7 @@ it('encrypts oauth access_token and refresh_token at rest and preserves refresh_
     );
 
     mockSocialiteCallback('google', $firstLogin);
-    $this->get('/auth/google/callback')->assertRedirect('/app');
+    $this->get('/auth/google/callback?code=oauth-code-1&state=oauth-state')->assertRedirect('/app');
 
     $identity = OauthIdentity::query()->where('user_id', $user->id)->firstOrFail();
     $rawRow = DB::table('oauth_identities')->where('id', $identity->id)->first();
@@ -417,7 +434,7 @@ it('encrypts oauth access_token and refresh_token at rest and preserves refresh_
     );
 
     mockSocialiteCallback('google', $secondLogin);
-    $this->get('/auth/google/callback')->assertRedirect('/app');
+    $this->get('/auth/google/callback?code=oauth-code-2&state=oauth-state')->assertRedirect('/app');
 
     $identity->refresh();
     expect($identity->access_token)->toBe('rotated-access-token-999')
@@ -487,9 +504,112 @@ it('prevents rebinding an existing provider_user_id to a different employee with
 
     mockSocialiteCallback('google', $forgedCallback);
 
-    $this->get('/auth/google/callback')->assertForbidden();
+    $this->get('/auth/google/callback?code=oauth-code&state=oauth-state')->assertForbidden();
     $this->assertGuest();
 });
+
+it('redirects cleanly to /login with error on OAuth cancellation, missing code, invalid state, or token exchange ClientException', function (): void {
+    $this->get('/auth/google/callback?error=access_denied&state=valid-state')
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors('sso');
+    $this->assertGuest();
+
+    $this->get('/auth/microsoft/callback?state=valid-state')
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors('sso');
+    $this->assertGuest();
+
+    $stateFailProvider = Mockery::mock();
+    $stateFailProvider->shouldReceive('user')->once()->andThrow(new InvalidStateException);
+
+    $clientFailProvider = Mockery::mock();
+    $clientFailProvider->shouldReceive('user')->once()->andThrow(new ClientException(
+        '400 Bad Request',
+        new Psr7Request('POST', 'https://oauth2.googleapis.com/token'),
+        new Psr7Response(400, [], '{"error":"invalid_grant"}'),
+    ));
+
+    $factory = Mockery::mock(SocialiteFactory::class);
+    $factory->shouldReceive('driver')->with('google')->once()->andReturn($stateFailProvider);
+    $factory->shouldReceive('driver')->with('microsoft')->once()->andReturn($clientFailProvider);
+    Socialite::swap($factory);
+
+    $this->get('/auth/google/callback?code=stale-code&state=bad-state')
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors('sso');
+
+    $this->get('/auth/microsoft/callback?code=expired-code&state=valid-state')
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors('sso');
+
+    $this->assertGuest();
+    expect(OauthIdentity::query()->count())->toBe(0);
+});
+
+it('extracts Microsoft tid, xms_edov, and email from MicrosoftProvider getClaims() when omitted from Graph raw response', function (): void {
+    $department = createSsoDepartment();
+    $user = createSsoEmployee($department, 'claims.user@acme.com', UserStatusEnum::Active, 'EMP-1010', 'Claims User');
+
+    $graphUser = (new SocialiteTwoUser)->setRaw([
+        'id' => 'ms-oid-claims-001',
+        'displayName' => 'Claims User',
+    ])->map([
+        'id' => 'ms-oid-claims-001',
+        'name' => 'Claims User',
+        'email' => null,
+    ])->setToken('ms-claims-token')
+        ->setRefreshToken('ms-claims-refresh')
+        ->setExpiresIn(3600)
+        ->setApprovedScopes(['openid', 'profile', 'User.Read']);
+
+    $idTokenClaims = (object) [
+        'tid' => '11111111-2222-3333-4444-555555555555',
+        'xms_edov' => '1',
+        'email' => 'claims.user@acme.com',
+    ];
+
+    mockMicrosoftProviderCallback($graphUser, $idTokenClaims);
+
+    $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state')
+        ->assertRedirect('/app');
+
+    $this->assertAuthenticatedAs($user);
+
+    $identity = OauthIdentity::query()->where('user_id', $user->id)->first();
+    expect($identity)->not->toBeNull()
+        ->and($identity->provider)->toBe(OidcProviderEnum::Microsoft)
+        ->and($identity->provider_tenant_id)->toBe('11111111-2222-3333-4444-555555555555')
+        ->and($identity->email)->toBe('claims.user@acme.com');
+});
+
+it('rejects Microsoft login with 403 when xms_edov claim is falsy in JWT claims', function (mixed $xmsEdov): void {
+    $department = createSsoDepartment();
+    createSsoEmployee($department, 'unverified.ms@acme.com', UserStatusEnum::Active, 'EMP-1011', 'Unverified MS');
+
+    $graphUser = makeFakeSocialiteUser(
+        id: 'ms-oid-unverified',
+        email: 'unverified.ms@acme.com',
+        name: 'Unverified MS',
+        rawClaims: [
+            'id' => 'ms-oid-unverified',
+            'userPrincipalName' => 'unverified.ms@acme.com',
+        ],
+    );
+
+    mockMicrosoftProviderCallback($graphUser, (object) [
+        'tid' => '11111111-2222-3333-4444-555555555555',
+        'xms_edov' => $xmsEdov,
+    ]);
+
+    $this->get('/auth/microsoft/callback?code=ms-code&state=ms-state')
+        ->assertForbidden();
+
+    $this->assertGuest();
+    expect(OauthIdentity::query()->count())->toBe(0);
+})->with([
+    'boolean false' => [false],
+    'string zero' => ['0'],
+]);
 
 it('verifies PostgreSQL citext column, unique index, and web middleware on module SSO routes', function (): void {
     $column = DB::selectOne(
