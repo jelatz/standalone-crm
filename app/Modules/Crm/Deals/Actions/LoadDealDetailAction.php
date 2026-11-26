@@ -93,9 +93,19 @@ class LoadDealDetailAction
             ->orderByDesc('id')
             ->first();
 
-        $activeHandoff = $activeHandoffModel !== null
-            && Gate::forUser($viewer)->allows('view', $activeHandoffModel)
-            ? DealHandoffSummaryData::fromModel($activeHandoffModel)
+        $canViewActiveHandoff = $activeHandoffModel !== null
+            && Gate::forUser($viewer)->allows('view', $activeHandoffModel);
+
+        $canViewProject = $canViewActiveHandoff
+            && $activeHandoffModel->project !== null
+            && Gate::forUser($viewer)->allows('view', $activeHandoffModel->project);
+
+        $activeHandoff = $canViewActiveHandoff
+            ? DealHandoffSummaryData::fromModel(
+                $activeHandoffModel,
+                canViewCompany: $canViewCompany,
+                canViewProject: $canViewProject,
+            )
             : null;
 
         return [

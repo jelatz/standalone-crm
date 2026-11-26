@@ -67,8 +67,15 @@ const submittedHandoffBanner = ref<App.Modules.Projects.Handoffs.Data.DealHandof
     null,
 );
 
-function maybeOpenWonHandoffDrawer(updated: App.Modules.Crm.Deals.Data.DealDetailData): void {
-    if (updated.stage_type !== 'won' || !effectiveCanSubmitHandoff.value) {
+function maybeOpenWonHandoffDrawer(
+    updated: App.Modules.Crm.Deals.Data.DealDetailData,
+    previousStageType: string | null,
+): void {
+    if (
+        previousStageType === 'won'
+        || updated.stage_type !== 'won'
+        || !effectiveCanSubmitHandoff.value
+    ) {
         return;
     }
 
@@ -303,6 +310,8 @@ async function moveDeal(
     conflictMessage.value = '';
     boardError.value = '';
 
+    const previousStageType =
+        stages.value.find((s) => s.id === deal.stage_id)?.stage_type ?? null;
     const snapshot = cloneColumns(localColumns.value);
     localColumns.value = applyDealMoveInColumns(
         localColumns.value,
@@ -332,7 +341,7 @@ async function moveDeal(
             neighbors.insertIndex,
         );
         emit('dealMoved', updated);
-        maybeOpenWonHandoffDrawer(updated);
+        maybeOpenWonHandoffDrawer(updated, previousStageType);
     } catch (error) {
         // Always rollback optimistic state on failure
         localColumns.value = snapshot;
@@ -370,6 +379,9 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
     pending.errors = {};
     pending.errorMessage = '';
 
+    const previousStageType =
+        stages.value.find((s) => s.id === pending.deal.stage_id)?.stage_type ?? null;
+
     try {
         const updated = await crmApi.moveDealStage(pending.deal.id, {
             target_stage_id: pending.targetStage.id,
@@ -389,7 +401,7 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
         );
         pendingGateMove.value = null;
         emit('dealMoved', updated);
-        maybeOpenWonHandoffDrawer(updated);
+        maybeOpenWonHandoffDrawer(updated, previousStageType);
     } catch (error) {
         if (error instanceof StageGateValidationError) {
             pending.missingCoreFields = error.missingCoreFields;

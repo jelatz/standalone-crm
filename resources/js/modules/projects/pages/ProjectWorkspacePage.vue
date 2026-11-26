@@ -120,10 +120,10 @@ watch(
     { deep: true },
 );
 
-const canMoveTasks = computed(
-    () => props.can.update || authStore.hasPermission('tasks.update'),
+const canMoveTasks = computed(() => props.can.update);
+const canDeleteTasks = computed(
+    () => props.can.delete || (props.can.update && authStore.hasPermission('tasks.delete')),
 );
-const canDeleteTasks = computed(() => authStore.hasPermission('tasks.delete'));
 
 const inspectedTask = computed<App.Modules.Projects.Tasks.Data.TaskData | null>(() => {
     if (!inspectedTaskId.value) {

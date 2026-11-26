@@ -8,6 +8,7 @@ import {
     Plus,
     RotateCcw,
     Search,
+    WifiOff,
 } from 'lucide-vue-next';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
@@ -26,6 +27,7 @@ import {
     projectStatusVariant,
 } from '@/modules/projects/utils/projectFormatters';
 import { formatEnumLabel, formatShortDate } from '@/modules/crm/utils/formatters';
+import { useRealtimeStore } from '@/stores/realtime.store';
 
 type ProjectRow = App.Modules.Projects.Projects.Data.ProjectSummaryData;
 
@@ -52,6 +54,7 @@ const props = defineProps<{
     };
 }>();
 
+const realtimeStore = useRealtimeStore();
 const instanceId = useId();
 const searchInputId = `projects-search-${instanceId}`;
 const statusSelectId = `projects-status-${instanceId}`;
@@ -344,6 +347,22 @@ async function handleCreateSubmit(): Promise<void> {
     <Head title="Projects" />
 
     <div class="space-y-4">
+        <!-- Offline / Reconnecting Banner -->
+        <div
+            v-if="realtimeStore.status === 'disconnected' && realtimeStore.lastError"
+            role="status"
+            data-testid="projects-index-offline-banner"
+            class="flex items-center justify-between gap-2 rounded-[8px] border border-status-warning/40 bg-status-warning/10 px-3.5 py-2 text-[12px] text-primary"
+        >
+            <div class="flex items-center gap-2">
+                <WifiOff class="h-4 w-4 shrink-0 text-status-warning" :stroke-width="1.75" aria-hidden="true" />
+                <span>Realtime connection unavailable. Refresh to sync project updates.</span>
+            </div>
+            <Button variant="secondary" size="sm" @click="applyFilters()">
+                Refresh
+            </Button>
+        </div>
+
         <!-- Header -->
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2 min-w-0">

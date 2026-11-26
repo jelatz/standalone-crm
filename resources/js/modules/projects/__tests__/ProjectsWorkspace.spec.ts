@@ -11,7 +11,7 @@ import {
     type RealtimePresenceChannelLike,
 } from '@/echo';
 import { useAuthStore } from '@/stores/auth.store';
-import { HANDOFF_STATUS_CHANGED_EVENT } from '@/stores/realtime.store';
+import { HANDOFF_STATUS_CHANGED_EVENT, useRealtimeStore } from '@/stores/realtime.store';
 import { useUnreadsStore } from '@/stores/unreads.store';
 import { crmApi } from '@/modules/crm/api/crmApi';
 import {
@@ -84,9 +84,11 @@ import HandoffReviewPanel from '@/modules/projects/components/HandoffReviewPanel
 import HandoffSubmitDrawer from '@/modules/projects/components/HandoffSubmitDrawer.vue';
 import ProjectKanbanBoard from '@/modules/projects/components/ProjectKanbanBoard.vue';
 import TaskDetailDrawer from '@/modules/projects/components/TaskDetailDrawer.vue';
+import HandoffDetailPage from '@/modules/projects/pages/HandoffDetailPage.vue';
 import HandoffIntakePage from '@/modules/projects/pages/HandoffIntakePage.vue';
 import MyWorkPage from '@/modules/projects/pages/MyWorkPage.vue';
 import ProjectWorkspacePage from '@/modules/projects/pages/ProjectWorkspacePage.vue';
+import ProjectsIndexPage from '@/modules/projects/pages/ProjectsIndexPage.vue';
 
 function makeUser(
     permissions: string[] = [
@@ -1161,5 +1163,306 @@ describe('Task 2.4 — Projects, Deal Handoffs, My Work & CRM/Shell Wiring', () 
         expect(intakeWrapper.get('[data-testid="handoff-review-empty"]').text()).toContain(
             'Select a handoff to inspect',
         );
+    });
+
+    it('opens HandoffSubmitDrawer only on transition into Won (Open -> Won) and not on same-stage Won -> Won reorder', async () => {
+        const openStage: App.Modules.Crm.Pipelines.Data.PipelineStageData = {
+            id: 'stg-open',
+            pipeline_id: 'pipe-1',
+            name: 'Negotiation',
+            stage_type: 'open',
+            win_probability: 75,
+            rotting_days: 14,
+            required_core_fields: [],
+            required_custom_field_ids: [],
+            sort_order: 1,
+        };
+        const wonStage: App.Modules.Crm.Pipelines.Data.PipelineStageData = {
+            id: 'stg-won',
+            pipeline_id: 'pipe-1',
+            name: 'Closed Won',
+            stage_type: 'won',
+            win_probability: 100,
+            rotting_days: null,
+            required_core_fields: [],
+            required_custom_field_ids: [],
+            sort_order: 2,
+        };
+
+        const baseDeal = {
+            company_id: 'comp-1',
+            company_name: 'Northwind Logistics',
+            primary_contact_id: null,
+            primary_contact_name: null,
+            pipeline_id: 'pipe-1',
+            owner_id: 'usr-rep-1',
+            owner_name: 'Devon Alvarez',
+            account_manager_id: null,
+            account_manager_name: null,
+            amount_cents: 2500000,
+            currency: 'USD',
+            expected_close_date: '2026-12-15',
+            stage_entered_at: '2026-11-20T10:00:00Z',
+            lost_at: null,
+            is_rotting: false,
+            custom_fields: {},
+            updated_at: '2026-11-25T10:00:00Z',
+        };
+
+        const openDeal: App.Modules.Crm.Deals.Data.DealCardData = {
+            ...baseDeal,
+            id: 'deal-open-1',
+            stage_id: 'stg-open',
+            stage_name: 'Negotiation',
+            stage_type: 'open',
+            title: 'Cascadia Cold Chain Phase 1',
+            won_at: null,
+            board_position: 65536,
+            version: 1,
+        };
+        const wonDealA: App.Modules.Crm.Deals.Data.DealCardData = {
+            ...baseDeal,
+            id: 'deal-won-a',
+            stage_id: 'stg-won',
+            stage_name: 'Closed Won',
+            stage_type: 'won',
+            title: 'Boreal Freight Portal',
+            won_at: '2026-11-24T10:00:00Z',
+            board_position: 65536,
+            version: 1,
+        };
+        const wonDealB: App.Modules.Crm.Deals.Data.DealCardData = {
+            ...baseDeal,
+            id: 'deal-won-b',
+            stage_id: 'stg-won',
+            stage_name: 'Closed Won',
+            stage_type: 'won',
+            title: 'Redwood Fleet Telemetry',
+            won_at: '2026-11-25T10:00:00Z',
+            board_position: 131072,
+            version: 1,
+        };
+
+        const reorderedWonDetail: App.Modules.Crm.Deals.Data.DealDetailData = {
+            ...wonDealA,
+            company_domain: 'northwind.internal',
+            primary_contact_email: null,
+            pipeline_name: 'Enterprise Sales',
+            stage_win_probability: 100,
+            lost_reason: null,
+            version: 2,
+            created_at: '2026-11-01T10:00:00Z',
+            has_masked_company: false,
+            has_masked_primary_contact: false,
+        };
+        const transitionedWonDetail: App.Modules.Crm.Deals.Data.DealDetailData = {
+            ...openDeal,
+            stage_id: 'stg-won',
+            stage_name: 'Closed Won',
+            stage_type: 'won',
+            won_at: '2026-11-26T00:00:00Z',
+            company_domain: 'northwind.internal',
+            primary_contact_email: null,
+            pipeline_name: 'Enterprise Sales',
+            stage_win_probability: 100,
+            lost_reason: null,
+            version: 2,
+            created_at: '2026-11-01T10:00:00Z',
+            has_masked_company: false,
+            has_masked_primary_contact: false,
+        };
+
+        const moveSpy = vi
+            .spyOn(crmApi, 'moveDealStage')
+            .mockResolvedValueOnce(reorderedWonDetail)
+            .mockResolvedValueOnce(transitionedWonDetail);
+
+        const boardWrapper = mount(DealKanbanBoard, {
+            attachTo: document.body,
+            props: {
+                board: {
+                    pipeline: {
+                        id: 'pipe-1',
+                        name: 'Enterprise Sales',
+                        slug: 'enterprise-sales',
+                        department_id: null,
+                        is_default: true,
+                        is_active: true,
+                        sort_order: 0,
+                        stages: [openStage, wonStage],
+                    },
+                    columns: [
+                        {
+                            stage: openStage,
+                            deals_count: 1,
+                            total_amount_cents: openDeal.amount_cents,
+                            deals: [openDeal],
+                        },
+                        {
+                            stage: wonStage,
+                            deals_count: 2,
+                            total_amount_cents: wonDealA.amount_cents + wonDealB.amount_cents,
+                            deals: [wonDealA, wonDealB],
+                        },
+                    ],
+                    total_deals_count: 3,
+                    total_amount_cents: openDeal.amount_cents * 3,
+                },
+                customFieldDefinitions: [],
+                canMoveDeals: true,
+                canSubmitHandoff: true,
+            },
+        });
+        mountedWrappers.push(boardWrapper);
+
+        // 1. Same-stage reorder inside Won (Won -> Won via drag/drop) must NOT open HandoffSubmitDrawer
+        await boardWrapper.get('[data-testid="kanban-card-deal-won-a"]').trigger('dragstart');
+        await boardWrapper.get('[data-testid="kanban-card-deal-won-b"]').trigger('drop');
+        await flushPromises();
+        await nextTick();
+
+        expect(moveSpy).toHaveBeenCalledTimes(1);
+        expect(boardWrapper.emitted('dealMoved')).toHaveLength(1);
+        expect(document.body.querySelector('[data-testid="handoff-submit-drawer"]')).toBeNull();
+
+        // 2. Stage transition into Won (Open -> Won) MUST open HandoffSubmitDrawer
+        await boardWrapper.get('[data-testid="kanban-stage-select-deal-open-1"]').setValue('stg-won');
+        await flushPromises();
+        await nextTick();
+
+        expect(moveSpy).toHaveBeenCalledTimes(2);
+        expect(boardWrapper.emitted('dealMoved')).toHaveLength(2);
+        expect(document.body.querySelector('[data-testid="handoff-submit-drawer"]')).not.toBeNull();
+    });
+
+    it('restricts ProjectKanbanBoard drag handles when can.update is false and shows offline banners on HandoffDetailPage and ProjectsIndexPage', async () => {
+        const authStore = useAuthStore();
+        authStore.setUser(makeUser(['projects.view', 'tasks.view', 'tasks.update']));
+
+        const realtimeStore = useRealtimeStore();
+        realtimeStore.status = 'disconnected';
+        realtimeStore.lastError = 'Socket disconnected';
+
+        const stageTodo = makeStage('stg-todo', 'To Do', 'todo', null, 1);
+        const viewerTask = makeTask('t-viewer', { project_stage_id: 'stg-todo', title: 'Audit delivery checklist' });
+
+        const viewerWorkspace = mount(ProjectWorkspacePage, {
+            attachTo: document.body,
+            props: {
+                project: {
+                    id: 'prj-1',
+                    code: 'PRJ-2026-0042',
+                    company_id: 'comp-1',
+                    company_name: 'Northwind Logistics',
+                    company_domain: 'northwind.internal',
+                    primary_deal_id: 'deal-won-1',
+                    primary_deal_title: 'Northwind Regional WMS Rollout',
+                    deal_handoff_id: 'hnd-1',
+                    owner_id: 'usr-pm-1',
+                    owner_name: 'Jordan Mercer',
+                    account_manager_id: 'usr-am-1',
+                    account_manager_name: 'Priya Nair',
+                    department_id: 'dept-delivery',
+                    department_name: 'Delivery',
+                    name: 'Northwind Logistics — WMS Deployment',
+                    description_json: null,
+                    status: 'active',
+                    health: 'on_track',
+                    start_date: '2026-11-26',
+                    target_end_date: '2026-12-30',
+                    completed_at: null,
+                    custom_fields: {},
+                    has_masked_company: false,
+                    has_masked_deal: false,
+                    created_at: '2026-11-26T08:00:00Z',
+                    updated_at: '2026-11-26T08:00:00Z',
+                },
+                stages: [stageTodo],
+                columns: [{ stage: stageTodo, tasks_count: 1, tasks: [viewerTask] }],
+                tasks: [viewerTask],
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [makeSummaryUser('usr-pm-1', 'Jordan Mercer')],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['project_manager'],
+                statuses: ['planning', 'active', 'on_hold', 'completed', 'cancelled'],
+                healthOptions: ['on_track', 'at_risk', 'off_track'],
+                stageCategories: ['backlog', 'todo', 'in_progress', 'review', 'done', 'cancelled'],
+                taskPriorities: ['low', 'medium', 'high', 'urgent'],
+                taskStatuses: ['todo', 'in_progress', 'blocked', 'review', 'done', 'cancelled'],
+                can: {
+                    update: false,
+                    delete: false,
+                    manageStages: false,
+                    manageCollaborators: false,
+                    createTask: false,
+                },
+            },
+        });
+        mountedWrappers.push(viewerWorkspace);
+        await nextTick();
+
+        expect(
+            viewerWorkspace.get('[data-testid="project-task-card-t-viewer"]').attributes('draggable'),
+        ).toBe('false');
+
+        const detailWrapper = mount(HandoffDetailPage, {
+            attachTo: document.body,
+            props: {
+                handoff: makeHandoffDetail(),
+                templates: [],
+                assignablePms: [],
+                assignableAms: [],
+                can: {
+                    resubmit: false,
+                    requestChanges: false,
+                    reject: false,
+                    approve: false,
+                    viewProject: false,
+                },
+            },
+        });
+        mountedWrappers.push(detailWrapper);
+        await nextTick();
+        expect(
+            detailWrapper.get('[data-testid="handoff-detail-offline-banner"]').attributes('role'),
+        ).toBe('status');
+
+        const indexWrapper = mount(ProjectsIndexPage, {
+            attachTo: document.body,
+            props: {
+                projects: {
+                    data: [],
+                    current_page: 1,
+                    last_page: 1,
+                    per_page: 25,
+                    total: 0,
+                },
+                filters: {
+                    search: null,
+                    status: null,
+                    health: null,
+                    owner_id: null,
+                    company_id: null,
+                    sort_by: 'updated_at',
+                    sort_dir: 'desc',
+                    page: 1,
+                    per_page: 25,
+                },
+                assignableUsers: [],
+                companies: [],
+                customFieldDefinitions: [],
+                statuses: ['planning', 'active'],
+                healthOptions: ['on_track', 'at_risk'],
+                can: { create: false },
+            },
+        });
+        mountedWrappers.push(indexWrapper);
+        await nextTick();
+        expect(
+            indexWrapper.get('[data-testid="projects-index-offline-banner"]').attributes('role'),
+        ).toBe('status');
     });
 });

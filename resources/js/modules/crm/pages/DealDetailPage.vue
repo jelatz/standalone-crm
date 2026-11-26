@@ -301,6 +301,7 @@ async function handleStageMove(targetStageId: string): Promise<void> {
     saveError.value = '';
     saveSuccess.value = '';
     conflictError.value = '';
+    const previousStageType = localDeal.value.stage_type;
 
     try {
         const updated = await crmApi.moveDealStage(localDeal.value.id, {
@@ -315,7 +316,12 @@ async function handleStageMove(targetStageId: string): Promise<void> {
 
         syncLocalFromDeal(updated);
         saveSuccess.value = `Moved to ${updated.stage_name ?? targetStage.name} (v${updated.version}).`;
-        if (updated.stage_type === 'won' && !localActiveHandoff.value && canSubmitHandoff.value) {
+        if (
+            previousStageType !== 'won'
+            && updated.stage_type === 'won'
+            && !localActiveHandoff.value
+            && canSubmitHandoff.value
+        ) {
             handoffDrawerOpen.value = true;
         }
     } catch (error) {
@@ -347,6 +353,7 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
     gateSubmitting.value = true;
     state.errors = {};
     state.errorMessage = '';
+    const previousStageType = localDeal.value.stage_type;
 
     try {
         const updated = await crmApi.moveDealStage(localDeal.value.id, {
@@ -362,7 +369,12 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
         syncLocalFromDeal(updated);
         gateModalState.value = null;
         saveSuccess.value = `Updated & moved to ${updated.stage_name ?? state.targetStage.name} (v${updated.version}).`;
-        if (updated.stage_type === 'won' && !localActiveHandoff.value && canSubmitHandoff.value) {
+        if (
+            previousStageType !== 'won'
+            && updated.stage_type === 'won'
+            && !localActiveHandoff.value
+            && canSubmitHandoff.value
+        ) {
             handoffDrawerOpen.value = true;
         }
     } catch (error) {

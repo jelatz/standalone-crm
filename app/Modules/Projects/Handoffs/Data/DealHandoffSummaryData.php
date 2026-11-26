@@ -15,7 +15,7 @@ class DealHandoffSummaryData extends Data
     public function __construct(
         public string $id,
         public string $deal_id,
-        public string $company_id,
+        public ?string $company_id,
         public ?string $deal_title,
         public ?int $deal_amount_cents,
         public ?string $deal_currency,
@@ -34,10 +34,13 @@ class DealHandoffSummaryData extends Data
         public ?string $provisioned_at,
     ) {}
 
-    public static function fromModel(DealHandoff $handoff): self
-    {
+    public static function fromModel(
+        DealHandoff $handoff,
+        bool $canViewCompany = true,
+        bool $canViewProject = true,
+    ): self {
         $deal = $handoff->relationLoaded('deal') ? $handoff->deal : null;
-        $company = $handoff->relationLoaded('company') ? $handoff->company : null;
+        $company = $canViewCompany && $handoff->relationLoaded('company') ? $handoff->company : null;
         $submittedBy = $handoff->relationLoaded('submittedBy') && $handoff->submittedBy !== null
             ? UserSummaryData::fromModel($handoff->submittedBy)
             : null;
@@ -53,18 +56,18 @@ class DealHandoffSummaryData extends Data
         $template = $handoff->relationLoaded('template') && $handoff->template !== null
             ? ProjectTemplateSummaryData::fromModel($handoff->template)
             : null;
-        $project = $handoff->relationLoaded('project') && $handoff->project !== null
+        $project = $canViewProject && $handoff->relationLoaded('project') && $handoff->project !== null
             ? HandoffProjectSummaryData::fromModel($handoff->project)
             : null;
 
         return new self(
             id: (string) $handoff->id,
             deal_id: (string) $handoff->deal_id,
-            company_id: (string) $handoff->company_id,
+            company_id: $canViewCompany ? (string) $handoff->company_id : null,
             deal_title: $deal?->title,
             deal_amount_cents: $deal !== null ? (int) $deal->amount_cents : null,
             deal_currency: $deal?->currency,
-            company_name: $company?->name,
+            company_name: $canViewCompany ? $company?->name : null,
             status: $handoff->status,
             target_kickoff_date: $handoff->target_kickoff_date?->format('Y-m-d'),
             review_feedback: $handoff->review_feedback,

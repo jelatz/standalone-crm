@@ -9,6 +9,7 @@ import {
     Edit3,
     RefreshCw,
     Square,
+    WifiOff,
 } from 'lucide-vue-next';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
@@ -20,6 +21,7 @@ import {
     handoffStatusVariant,
 } from '@/modules/projects/utils/projectFormatters';
 import { formatDateTime, formatMoneyCents, formatShortDate } from '@/modules/crm/utils/formatters';
+import { useRealtimeStore } from '@/stores/realtime.store';
 
 const props = withDefaults(
     defineProps<{
@@ -38,6 +40,7 @@ const props = withDefaults(
     {},
 );
 
+const realtimeStore = useRealtimeStore();
 const localHandoff = ref<App.Modules.Projects.Handoffs.Data.DealHandoffDetailData>(props.handoff);
 const resubmitDrawerOpen = ref<boolean>(false);
 const refreshing = ref<boolean>(false);
@@ -85,6 +88,22 @@ function handleUpdated(updated: App.Modules.Projects.Handoffs.Data.DealHandoffDe
     <Head :title="`Handoff — ${localHandoff.deal?.title ?? 'Deal Brief'}`" />
 
     <div class="space-y-4">
+        <!-- Offline / Reconnecting Banner -->
+        <div
+            v-if="realtimeStore.status === 'disconnected' && realtimeStore.lastError"
+            role="status"
+            data-testid="handoff-detail-offline-banner"
+            class="flex items-center justify-between gap-2 rounded-[8px] border border-status-warning/40 bg-status-warning/10 px-3.5 py-2 text-[12px] text-primary"
+        >
+            <div class="flex items-center gap-2">
+                <WifiOff class="h-4 w-4 shrink-0 text-status-warning" :stroke-width="1.75" aria-hidden="true" />
+                <span>Realtime connection unavailable. Use Sync to refresh updates.</span>
+            </div>
+            <Button variant="secondary" size="sm" @click="refreshFromServer">
+                Sync
+            </Button>
+        </div>
+
         <!-- Header -->
         <header class="flex flex-col gap-3 rounded-[8px] border border-default bg-surface px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
             <div class="min-w-0 space-y-1">

@@ -4,10 +4,12 @@ namespace App\Modules\Projects\Handoffs\Actions;
 
 use App\Modules\Core\Rbac\Enums\PermissionEnum;
 use App\Modules\Core\Users\Models\User;
+use App\Modules\Crm\Companies\Models\Company;
 use App\Modules\Projects\Handoffs\Data\DealHandoffSummaryData;
 use App\Modules\Projects\Handoffs\Enums\DealHandoffStatusEnum;
 use App\Modules\Projects\Handoffs\Models\DealHandoff;
 use App\Modules\Projects\Handoffs\Support\DealHandoffQuerySupport;
+use App\Modules\Projects\Projects\Models\Project;
 use App\Support\Silo\VisibleScopeResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
@@ -43,7 +45,7 @@ class ListHandoffQueueAction
 
         $parsedStatus = $statusFilter !== null ? DealHandoffStatusEnum::tryFrom($statusFilter) : null;
 
-        $handoffs = (clone $baseQuery)
+        $handoffModels = (clone $baseQuery)
             ->with(DealHandoffQuerySupport::eagerLoadRelations())
             ->when(
                 $parsedStatus !== null,
@@ -52,8 +54,56 @@ class ListHandoffQueueAction
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->limit(100)
-            ->get()
-            ->map(static fn (DealHandoff $handoff): DealHandoffSummaryData => DealHandoffSummaryData::fromModel($handoff))
+            ->get();
+
+        $companyIds = $handoffModels
+            ->pluck('company_id')
+            ->filter()
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $projectIds = $handoffModels
+            ->map(static fn (DealHandoff $handoff): ?string => $handoff->project !== null ? (string) $handoff->project->id : null)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        /** @var array<string, int|string> $visibleCompanyIds */
+        $visibleCompanyIds = ($companyIds !== [] && Gate::forUser($viewer)->allows('viewAny', Company::class))
+            ? Company::query()
+                ->visibleTo($viewer)
+                ->whereIn('id', $companyIds)
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->flip()
+                ->all()
+            : [];
+
+        /** @var array<string, int|string> $visibleProjectIds */
+        $visibleProjectIds = ($projectIds !== [] && Gate::forUser($viewer)->allows('viewAny', Project::class))
+            ? Project::query()
+                ->visibleTo($viewer)
+                ->whereIn('id', $projectIds)
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->flip()
+                ->all()
+            : [];
+
+        $handoffs = $handoffModels
+            ->map(static function (DealHandoff $handoff) use ($visibleCompanyIds, $visibleProjectIds): DealHandoffSummaryData {
+                $companyId = (string) $handoff->company_id;
+                $projectId = $handoff->project !== null ? (string) $handoff->project->id : null;
+
+                return DealHandoffSummaryData::fromModel(
+                    handoff: $handoff,
+                    canViewCompany: isset($visibleCompanyIds[$companyId]),
+                    canViewProject: $projectId !== null && isset($visibleProjectIds[$projectId]),
+                );
+            })
             ->values()
             ->all();
 

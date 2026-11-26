@@ -559,7 +559,7 @@ updated_at: string,
 export type DealHandoffSummaryData = {
 id: string,
 deal_id: string,
-company_id: string,
+company_id: string | null,
 deal_title: string | null,
 deal_amount_cents: number | null,
 deal_currency: string | null,

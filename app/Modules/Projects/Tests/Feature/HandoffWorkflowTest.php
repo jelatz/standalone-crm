@@ -755,3 +755,82 @@ it('exposes activeHandoff and can.submitHandoff on DealDetailPage while masking 
             ->where('activeHandoff', null)
             ->where('can.submitHandoff', true));
 });
+
+it('masks cross-silo company and provisioned project fields on activeHandoff when deal collaborator lacks company or project access', function (): void {
+    $dept = Department::query()->create(['name' => 'Cross Silo', 'slug' => 'handoff-cross-silo']);
+
+    $repOwner = createHandoffWorkflowUser($dept, 'EMP-XS-OWN', 'own.xs@acme.internal', RoleEnum::Sales);
+    $am = createHandoffWorkflowUser($dept, 'EMP-XS-AM', 'am.xs@acme.internal', RoleEnum::AccountManager);
+    $collabOnly = createHandoffWorkflowUser($dept, 'EMP-XS-COL', 'col.xs@acme.internal', RoleEnum::Sales);
+    $opsMgr = createHandoffWorkflowUser($dept, 'EMP-XS-OPS', 'ops.xs@acme.internal', RoleEnum::OperationsManager);
+    $pm = createHandoffWorkflowUser($dept, 'EMP-XS-PM', 'pm.xs@acme.internal', RoleEnum::ProjectManager);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $wonStage = $pipeline->stages()->where('stage_type', PipelineStageTypeEnum::Won->value)->firstOrFail();
+    [$company, $wonDeal] = createDealForHandoff($repOwner, $pipeline, $wonStage, 'Pacific Cross-Silo Rollout', $am);
+
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $wonDeal,
+        user: $collabOnly,
+        accessLevel: CollaboratorAccessLevel::Viewer,
+        roleLabel: CollaboratorRoleLabel::SalesOverlay,
+        grantedBy: $repOwner,
+    );
+
+    $template = ProjectTemplate::query()->firstOrFail();
+
+    $handoffId = $this->actingAs($repOwner)
+        ->postJson("/api/internal/crm/deals/{$wonDeal->id}/handoffs", [
+            'scope_notes_json' => validScopeNotes('Cross-silo verification scope'),
+            'handoff_checklist' => [['label' => 'Signed SOW', 'checked' => true]],
+            'assigned_am_id' => $am->id,
+        ])
+        ->assertCreated()
+        ->json('id');
+
+    $this->actingAs($opsMgr)
+        ->postJson("/api/internal/handoffs/{$handoffId}/approve", [
+            'project_template_id' => $template->id,
+            'assigned_pm_id' => $pm->id,
+            'assigned_am_id' => $am->id,
+        ])
+        ->assertOk();
+
+    $handoff = DealHandoff::query()->with('project')->findOrFail($handoffId);
+    expect($handoff->project)->not->toBeNull();
+    $projectId = (string) $handoff->project->id;
+
+    // Deal collaborator without Company or Project visibility still sees activeHandoff status
+    // but receives null for company_id, company_name, and provisioned_project
+    $this->actingAs($collabOnly)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('company', null)
+            ->where('activeHandoff.id', $handoffId)
+            ->where('activeHandoff.status', DealHandoffStatusEnum::Provisioned->value)
+            ->where('activeHandoff.company_id', null)
+            ->where('activeHandoff.company_name', null)
+            ->where('activeHandoff.provisioned_project', null));
+
+    // Handoff queue also masks company and provisioned_project consistently for the deal-only collaborator
+    $this->actingAs($collabOnly)
+        ->get('/app/projects/handoffs')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('handoffs', 1)
+            ->where('handoffs.0.id', $handoffId)
+            ->where('handoffs.0.company_id', null)
+            ->where('handoffs.0.company_name', null)
+            ->where('handoffs.0.provisioned_project', null));
+
+    // Assigned AM who can view Company & Project receives full company + provisioned_project summary
+    $this->actingAs($am)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('activeHandoff.id', $handoffId)
+            ->where('activeHandoff.company_id', $company->id)
+            ->where('activeHandoff.company_name', $company->name)
+            ->where('activeHandoff.provisioned_project.id', $projectId));
+});
