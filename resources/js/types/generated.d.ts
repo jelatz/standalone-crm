@@ -75,6 +75,33 @@ export type CompanyLifecycleStageEnum = 'lead' | 'prospect' | 'active_client' | 
 }
 }
 namespace CustomFields {
+namespace Data {
+export type CustomFieldDefinitionData = {
+id: string,
+entity_type: App.Modules.Crm.CustomFields.Enums.CustomFieldEntityTypeEnum,
+pipeline_id: string | null,
+key: string,
+label: string,
+field_type: App.Modules.Crm.CustomFields.Enums.CustomFieldTypeEnum,
+options: Record<string, any>[] | null,
+validation_rules: Record<string, any>,
+is_filterable: boolean,
+is_active: boolean,
+sort_order: number,
+};
+export type UpsertCustomFieldDefinitionData = {
+entity_type: App.Modules.Crm.CustomFields.Enums.CustomFieldEntityTypeEnum | undefined,
+pipeline_id: undefined | string | null,
+key: undefined | string,
+label: undefined | string,
+field_type: App.Modules.Crm.CustomFields.Enums.CustomFieldTypeEnum | undefined,
+options: (Record<string, any> | string)[] | undefined | null,
+validation_rules: Record<string, any> | undefined,
+is_filterable: undefined | boolean,
+is_active: undefined | boolean,
+sort_order: undefined | number,
+};
+}
 namespace Enums {
 export type CustomFieldEntityTypeEnum = 'company' | 'contact' | 'deal' | 'project';
 export type CustomFieldTypeEnum = 'text' | 'textarea' | 'number' | 'currency' | 'boolean' | 'date' | 'select' | 'multi_select' | 'user_id' | 'url';
@@ -85,12 +112,98 @@ namespace Enums {
 export type DealStakeholderRoleEnum = 'decision_maker' | 'champion' | 'billing' | 'technical_buyer' | 'influencer';
 }
 }
+namespace Notes {
+namespace Data {
+export type CreateNoteData = {
+body_json: Record<string, any>,
+targets: App.Modules.Crm.Notes.Data.NoteTargetData[],
+is_pinned: boolean,
+};
+export type NoteData = {
+id: string,
+author_id: string,
+author_name: string | null,
+body_json: Record<string, any>,
+body_text: string,
+is_pinned: boolean,
+created_at: string,
+updated_at: string,
+};
+export type NoteTargetData = {
+linkable_type: string,
+linkable_id: string,
+};
+export type UpdateNoteData = {
+body_json: Record<string, any>,
+};
+}
+}
 namespace Pipelines {
+namespace Data {
+export type PipelineData = {
+id: string,
+name: string,
+slug: string,
+department_id: string | null,
+is_default: boolean,
+is_active: boolean,
+sort_order: number,
+stages: App.Modules.Crm.Pipelines.Data.PipelineStageData[],
+};
+export type PipelineStageData = {
+id: string,
+pipeline_id: string,
+name: string,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum,
+win_probability: number,
+rotting_days: number | null,
+required_core_fields: string[],
+required_custom_field_ids: string[],
+sort_order: number,
+};
+export type UpsertPipelineData = {
+name: undefined | string,
+slug: undefined | string | null,
+department_id: undefined | string | null,
+is_default: undefined | boolean,
+is_active: undefined | boolean,
+sort_order: undefined | number,
+};
+export type UpsertPipelineStageData = {
+name: undefined | string,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | undefined,
+win_probability: undefined | number,
+rotting_days: undefined | number | null,
+required_core_fields: string[] | undefined,
+required_custom_field_ids: string[] | undefined,
+sort_order: undefined | number,
+};
+}
 namespace Enums {
 export type PipelineStageTypeEnum = 'open' | 'won' | 'lost';
 }
 }
 namespace Timeline {
+namespace Data {
+export type ActivityData = {
+id: string,
+actor_id: string | null,
+actor_name: string | null,
+activity_type: App.Modules.Crm.Timeline.Enums.ActivityTypeEnum,
+source_type: string,
+source_id: string,
+visibility_mode: string,
+summary: string,
+metadata: Record<string, any>,
+occurred_at: string,
+note: App.Modules.Crm.Notes.Data.NoteData | null,
+};
+export type TimelinePageData = {
+items: App.Modules.Crm.Timeline.Data.ActivityData[],
+next_cursor: string | null,
+has_more: boolean,
+};
+}
 namespace Enums {
 export type ActivityTypeEnum = 'note_created' | 'deal_created' | 'stage_changed' | 'field_updated' | 'task_created' | 'task_completed' | 'email_received' | 'email_sent' | 'chat_thread_created' | 'handoff_submitted' | 'handoff_approved' | 'project_provisioned';
 }

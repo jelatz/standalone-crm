@@ -46,15 +46,11 @@ class NotePolicy
 
     protected function authorizeNoteAccess(User $user, Note $note, string $targetAbility): bool
     {
-        if (! $this->isActiveEmployee($user) || $note->trashed()) {
+        if (! $note->exists || ! $this->isActiveEmployee($user) || $note->trashed()) {
             return false;
         }
 
         if ($user->hasRole(RoleEnum::Admin->value)) {
-            return true;
-        }
-
-        if ((string) $note->author_id === (string) $user->id) {
             return true;
         }
 
@@ -68,6 +64,13 @@ class NotePolicy
             )
             ->get(['linkable_type', 'linkable_id'])
             ->groupBy('linkable_type');
+
+        if ($linksByType->isEmpty()) {
+            return (string) $note->author_id === (string) $user->id;
+        }
+
+        $hasViewAccess = false;
+        $hasTargetAbility = false;
 
         foreach ($linksByType as $linkableType => $links) {
             $modelClass = Relation::getMorphedModel((string) $linkableType);
@@ -87,12 +90,28 @@ class NotePolicy
             $targets = $modelClass::query()->whereKey($ids)->get();
 
             foreach ($targets as $target) {
-                if (Gate::forUser($user)->allows($targetAbility, $target)) {
-                    return true;
+                if (Gate::forUser($user)->allows('view', $target)) {
+                    $hasViewAccess = true;
+
+                    if ($targetAbility === 'view') {
+                        return true;
+                    }
+                }
+
+                if ($targetAbility !== 'view' && Gate::forUser($user)->allows($targetAbility, $target)) {
+                    $hasTargetAbility = true;
+
+                    if ($hasViewAccess) {
+                        return true;
+                    }
                 }
             }
         }
 
-        return false;
+        if (! $hasViewAccess) {
+            return false;
+        }
+
+        return $hasTargetAbility || (string) $note->author_id === (string) $user->id;
     }
 }

@@ -23,7 +23,7 @@ trait HandlesSiloPolicy
 
     protected function canViewSiloRecord(User $user, Model $record, PermissionEnum $permission): bool
     {
-        if (! $this->isActiveEmployee($user) || ! $user->checkPermissionTo($permission->value)) {
+        if (! $record->exists || ! $this->isActiveEmployee($user) || ! $user->checkPermissionTo($permission->value)) {
             return false;
         }
 
@@ -67,7 +67,7 @@ trait HandlesSiloPolicy
         PermissionEnum $permission,
         array $allowedCollaboratorLevels,
     ): bool {
-        if (! $this->isActiveEmployee($user) || ! $user->checkPermissionTo($permission->value)) {
+        if (! $record->exists || ! $this->isActiveEmployee($user) || ! $user->checkPermissionTo($permission->value)) {
             return false;
         }
 
