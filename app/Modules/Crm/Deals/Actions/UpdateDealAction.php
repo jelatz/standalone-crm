@@ -12,6 +12,7 @@ use App\Modules\Crm\Pipelines\Models\PipelineStage;
 use App\Modules\Crm\Timeline\Actions\RecordActivityAction;
 use App\Modules\Crm\Timeline\Enums\ActivityTypeEnum;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
@@ -39,13 +40,37 @@ class UpdateDealAction
         }
 
         return DB::transaction(function () use ($actor, $deal, $data): Deal {
+            // Lock requested stage before the deal row to enforce canonical stage -> deal lock ordering.
+            $requestedStage = null;
+            if (! $data->stage_id instanceof Optional) {
+                $requestedStage = PipelineStage::query()
+                    ->with('requiredCustomFields')
+                    ->where('pipeline_id', $deal->pipeline_id)
+                    ->whereKey(trim($data->stage_id))
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            }
+
             $lockedDeal = Deal::query()
                 ->whereKey($deal->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            if ($requestedStage !== null && (string) $lockedDeal->pipeline_id !== (string) $requestedStage->pipeline_id) {
+                throw (new ModelNotFoundException)->setModel(Deal::class, [$deal->id]);
+            }
+
             if ($data->expected_version !== $lockedDeal->version) {
                 throw $this->buildDealDetail->buildConflictException($actor, $lockedDeal);
+            }
+
+            $gateOverridden = false;
+            if ($data->override_gates) {
+                if (! Gate::forUser($actor)->allows('overrideGates', $lockedDeal)) {
+                    throw new AuthorizationException('You are not authorized to override stage gate requirements.');
+                }
+
+                $gateOverridden = true;
             }
 
             $attributes = [];
@@ -166,23 +191,13 @@ class UpdateDealAction
             $stageTransitioned = false;
             $previousStage = null;
             $targetStage = null;
-            $gateOverridden = false;
 
-            if (! $data->stage_id instanceof Optional && trim($data->stage_id) !== (string) $lockedDeal->stage_id) {
+            if ($requestedStage !== null && (string) $requestedStage->id !== (string) $lockedDeal->stage_id) {
                 Gate::forUser($actor)->authorize('moveStage', $lockedDeal);
 
-                $targetStage = PipelineStage::query()
-                    ->with('requiredCustomFields')
-                    ->where('pipeline_id', $lockedDeal->pipeline_id)
-                    ->findOrFail(trim($data->stage_id));
+                $targetStage = $requestedStage;
 
-                if ($data->override_gates) {
-                    if (! Gate::forUser($actor)->allows('overrideGates', $lockedDeal)) {
-                        throw new AuthorizationException('You are not authorized to override stage gate requirements.');
-                    }
-
-                    $gateOverridden = true;
-                } else {
+                if (! $gateOverridden) {
                     $this->validateStageGate->execute(
                         targetStage: $targetStage,
                         amountCents: $nextAmountCents,
@@ -195,7 +210,7 @@ class UpdateDealAction
 
                 $previousStage = $lockedDeal->stage()->first();
 
-                PipelineStage::query()->whereKey($targetStage->id)->lockForUpdate()->first();
+                // $targetStage is already locked FOR UPDATE at the start of the transaction.
                 $maxPosition = Deal::query()
                     ->where('pipeline_id', $lockedDeal->pipeline_id)
                     ->where('stage_id', $targetStage->id)

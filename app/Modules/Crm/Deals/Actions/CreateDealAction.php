@@ -143,16 +143,21 @@ class CreateDealAction
                 $this->assertAssociations->assertContactsVisible($actor, $stakeholderIds);
             }
 
-            PipelineStage::query()->whereKey($stage->id)->lockForUpdate()->first();
+            $stageLock = PipelineStage::query()
+                ->where('pipeline_id', $pipeline->id)
+                ->whereKey($stage->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $maxPosition = Deal::query()
                 ->where('pipeline_id', $pipeline->id)
-                ->where('stage_id', $stage->id)
+                ->where('stage_id', $stageLock->id)
                 ->max('board_position');
             $boardPosition = ($maxPosition !== null ? (float) $maxPosition : 0.0) + 65536.0;
 
             $now = now();
-            $wonAt = $stage->stage_type === PipelineStageTypeEnum::Won ? $now : null;
-            $lostAt = $stage->stage_type === PipelineStageTypeEnum::Lost ? $now : null;
+            $wonAt = $stageLock->stage_type === PipelineStageTypeEnum::Won ? $now : null;
+            $lostAt = $stageLock->stage_type === PipelineStageTypeEnum::Lost ? $now : null;
 
             $deal = Deal::query()->create([
                 'company_id' => trim($data->company_id),

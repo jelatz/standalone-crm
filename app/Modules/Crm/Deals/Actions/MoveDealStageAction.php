@@ -12,6 +12,7 @@ use App\Modules\Crm\Pipelines\Models\PipelineStage;
 use App\Modules\Crm\Timeline\Actions\RecordActivityAction;
 use App\Modules\Crm\Timeline\Enums\ActivityTypeEnum;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
@@ -76,19 +77,26 @@ class MoveDealStageAction
         }
 
         return DB::transaction(function () use ($actor, $deal, $data): Deal {
+            // Lock target stage before deal rows to enforce canonical stage -> deal lock ordering.
+            $targetStage = PipelineStage::query()
+                ->with('requiredCustomFields')
+                ->where('pipeline_id', $deal->pipeline_id)
+                ->whereKey($data->target_stage_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $lockedDeal = Deal::query()
                 ->whereKey($deal->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            if ((string) $lockedDeal->pipeline_id !== (string) $targetStage->pipeline_id) {
+                throw (new ModelNotFoundException)->setModel(Deal::class, [$deal->id]);
+            }
+
             if ($data->expected_version !== $lockedDeal->version) {
                 throw $this->buildDealDetail->buildConflictException($actor, $lockedDeal);
             }
-
-            $targetStage = PipelineStage::query()
-                ->with('requiredCustomFields')
-                ->where('pipeline_id', $lockedDeal->pipeline_id)
-                ->findOrFail($data->target_stage_id);
 
             $gateOverridden = false;
             if ($data->override_gates) {
@@ -270,26 +278,28 @@ class MoveDealStageAction
         ?string $beforeDealId,
         ?string $afterDealId,
     ): float {
-        // Lock the target stage row to serialize position calculations and rebalances on this column.
-        PipelineStage::query()->whereKey($targetStage->id)->lockForUpdate()->first();
+        // $targetStage is already locked FOR UPDATE at the start of the transaction.
+        // Lock neighbor deals in deterministic sorted UUID order to prevent AB-BA deadlocks.
+        $neighborIds = array_values(array_unique(array_filter(
+            [$beforeDealId, $afterDealId],
+            static fn (?string $id): bool => $id !== null && $id !== (string) $lockedDeal->id,
+        )));
+        sort($neighborIds, SORT_STRING);
 
-        $beforeDeal = $beforeDealId !== null
-            ? Deal::query()
+        /** @var array<string, Deal> $lockedNeighbors */
+        $lockedNeighbors = [];
+        foreach ($neighborIds as $neighborId) {
+            $lockedNeighbors[$neighborId] = Deal::query()
                 ->visibleTo($actor)
                 ->where('pipeline_id', $lockedDeal->pipeline_id)
                 ->where('stage_id', $targetStage->id)
+                ->whereKey($neighborId)
                 ->lockForUpdate()
-                ->findOrFail($beforeDealId)
-            : null;
+                ->firstOrFail();
+        }
 
-        $afterDeal = $afterDealId !== null
-            ? Deal::query()
-                ->visibleTo($actor)
-                ->where('pipeline_id', $lockedDeal->pipeline_id)
-                ->where('stage_id', $targetStage->id)
-                ->lockForUpdate()
-                ->findOrFail($afterDealId)
-            : null;
+        $beforeDeal = $beforeDealId !== null ? ($lockedNeighbors[$beforeDealId] ?? null) : null;
+        $afterDeal = $afterDealId !== null ? ($lockedNeighbors[$afterDealId] ?? null) : null;
 
         if ($beforeDeal === null && $afterDeal === null) {
             $maxPosition = Deal::query()

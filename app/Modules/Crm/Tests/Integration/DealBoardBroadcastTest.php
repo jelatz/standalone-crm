@@ -9,6 +9,7 @@ use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Companies\Models\Company;
+use App\Modules\Crm\Deals\Actions\BroadcastDealBoardInvalidationAction;
 use App\Modules\Crm\Deals\Actions\MoveDealStageAction;
 use App\Modules\Crm\Deals\Data\MoveDealStageData;
 use App\Modules\Crm\Deals\Events\SiloBoardInvalidated;
@@ -221,4 +222,48 @@ it('suppresses SiloBoardInvalidated broadcast on outer transaction rollback and 
         static fn (SiloBoardInvalidated $event): bool => $event->recipientUserId === $repA->id
             && $event->dealId === $deal->id,
     );
+});
+
+it('isolates transient recipient resolution DB exceptions after commit so HTTP responses succeed', function () use ($createBroadcastTestUser): void {
+    $dept = Department::query()->create(['name' => 'Resilience', 'slug' => 't14-bcast-resilience']);
+    $repA = $createBroadcastTestUser($dept, 'EMP-RES-REPA', 'rep.res.bc@acme.internal', RoleEnum::Sales);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stages = $pipeline->stages()->orderBy('sort_order')->get()->keyBy('name');
+
+    $company = Company::query()->create(['name' => 'Resilient Co', 'owner_id' => $repA->id]);
+    $deal = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stages['Qualification']->id,
+        'owner_id' => $repA->id,
+        'title' => 'Resilient Deal',
+        'amount_cents' => 50000,
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+
+    $failingBroadcaster = new class extends BroadcastDealBoardInvalidationAction
+    {
+        public function resolveAuthorizedRecipientIds(string $dealId, string $ownerId, ?string $accountManagerId): array
+        {
+            throw new RuntimeException('Simulated post-commit recipient query failure');
+        }
+    };
+
+    $this->app->instance(BroadcastDealBoardInvalidationAction::class, $failingBroadcaster);
+
+    try {
+        $this->actingAs($repA)->patchJson("/api/internal/crm/deals/{$deal->id}/move-stage", [
+            'target_stage_id' => $stages['Discovery']->id,
+            'expected_version' => 1,
+        ])->assertOk()
+            ->assertJsonPath('stage_id', $stages['Discovery']->id)
+            ->assertJsonPath('version', 2);
+
+        expect($deal->fresh()->stage_id)->toBe($stages['Discovery']->id)
+            ->and($deal->fresh()->version)->toBe(2);
+    } finally {
+        $this->app->forgetInstance(BroadcastDealBoardInvalidationAction::class);
+    }
 });

@@ -20,7 +20,9 @@ use App\Modules\Crm\Timeline\Models\Activity;
 use App\Modules\Crm\Timeline\Models\ActivityLink;
 use Database\Seeders\CrmDefaultsSeeder;
 use Database\Seeders\RolesPermissionsSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -676,4 +678,150 @@ it('returns 409 Conflict with fresh entity payload on stale version in both Upda
     expect($fresh->version)->toBe(2)
         ->and($fresh->stage_id)->toBe($stages['Qualification']->id)
         ->and($fresh->title)->toBe('Updated By Editor');
+});
+
+it('denies override_gates for Sales in UpdateDealAction even when stage_id is unchanged or omitted, while enforcing canonical stage-then-deal lock ordering', function (): void {
+    $dept = Department::query()->create(['name' => 'Locking', 'slug' => 't14-lock-order']);
+    $director = createTask14User($dept, 'EMP-LO-DIR', 'dir.lo.t14@acme.internal', RoleEnum::Director);
+    $rep = createTask14User($dept, 'EMP-LO-REP', 'rep.lo.t14@acme.internal', RoleEnum::Sales, $director);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stages = $pipeline->stages()->orderBy('sort_order')->get()->keyBy('name');
+    $qualStage = $stages['Qualification'];
+    $discStage = $stages['Discovery'];
+    $negStage = $stages['Negotiation'];
+
+    $otherPipeline = Pipeline::query()->where('slug', 'renewal-upsell')->firstOrFail();
+    $otherStage = $otherPipeline->stages()->firstOrFail();
+
+    $company = Company::query()->create(['name' => 'Order Corp', 'owner_id' => $rep->id]);
+
+    $neighborA = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $discStage->id,
+        'owner_id' => $rep->id,
+        'title' => 'Neighbor A',
+        'board_position' => 100000.0,
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+
+    $neighborB = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $discStage->id,
+        'owner_id' => $rep->id,
+        'title' => 'Neighbor B',
+        'board_position' => 200000.0,
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+
+    if ((string) $neighborA->id < (string) $neighborB->id) {
+        $neighborLowerUuid = $neighborA;
+        $neighborHigherUuid = $neighborB;
+    } else {
+        $neighborLowerUuid = $neighborB;
+        $neighborHigherUuid = $neighborA;
+    }
+
+    // Ensure before_deal_id has the lexicographically higher UUID so sorted locking is explicitly exercised.
+    $neighborHigherUuid->update(['board_position' => 100000.0]);
+    $neighborLowerUuid->update(['board_position' => 200000.0]);
+
+    expect((string) $neighborHigherUuid->id > (string) $neighborLowerUuid->id)->toBeTrue();
+
+    $deal = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $qualStage->id,
+        'owner_id' => $rep->id,
+        'title' => 'Order Tested Deal',
+        'amount_cents' => 0,
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+
+    // 1. Sales rep cannot send override_gates=true via UpdateDealAction when stage_id is omitted
+    $this->actingAs($rep)->patchJson("/api/internal/crm/deals/{$deal->id}", [
+        'expected_version' => 1,
+        'title' => 'Sneaky Override Title',
+        'override_gates' => true,
+    ])->assertForbidden();
+
+    // 2. Sales rep cannot send override_gates=true via UpdateDealAction when stage_id equals current stage
+    $this->actingAs($rep)->patchJson("/api/internal/crm/deals/{$deal->id}", [
+        'expected_version' => 1,
+        'stage_id' => $qualStage->id,
+        'title' => 'Same Stage Override',
+        'override_gates' => true,
+    ])->assertForbidden();
+
+    // 3. Sales rep cannot send override_gates=true via UpdateDealAction when stage_id changes to gated stage
+    $this->actingAs($rep)->patchJson("/api/internal/crm/deals/{$deal->id}", [
+        'expected_version' => 1,
+        'stage_id' => $negStage->id,
+        'override_gates' => true,
+    ])->assertForbidden();
+
+    expect($deal->fresh()->title)->toBe('Order Tested Deal')
+        ->and($deal->fresh()->stage_id)->toBe($qualStage->id)
+        ->and($deal->fresh()->version)->toBe(1);
+
+    // 4. Cross-pipeline stage_id on UpdateDealAction fails closed with 404
+    $this->actingAs($rep)->patchJson("/api/internal/crm/deals/{$deal->id}", [
+        'expected_version' => 1,
+        'stage_id' => $otherStage->id,
+    ])->assertNotFound();
+
+    // 5. Capture FOR UPDATE query sequence across MoveDealStageAction & UpdateDealAction
+    /** @var list<array{sql: string, bindings: array<int|string, mixed>}> $forUpdateQueries */
+    $forUpdateQueries = [];
+    DB::listen(static function (QueryExecuted $query) use (&$forUpdateQueries): void {
+        if (str_contains(strtolower($query->sql), 'for update')) {
+            $forUpdateQueries[] = [
+                'sql' => $query->sql,
+                'bindings' => $query->bindings,
+            ];
+        }
+    });
+
+    // MoveDealStageAction with reversed UUID neighbor inputs locks: targetStage -> deal -> sorted(lowerUuid, higherUuid)
+    $this->actingAs($rep)->patchJson("/api/internal/crm/deals/{$deal->id}/move-stage", [
+        'target_stage_id' => $discStage->id,
+        'expected_version' => 1,
+        'before_deal_id' => $neighborHigherUuid->id,
+        'after_deal_id' => $neighborLowerUuid->id,
+    ])->assertOk()
+        ->assertJsonPath('stage_id', $discStage->id)
+        ->assertJsonPath('board_position', 150000)
+        ->assertJsonPath('version', 2);
+
+    expect($forUpdateQueries)->toHaveCount(4)
+        ->and($forUpdateQueries[0]['sql'])->toContain('"pipeline_stages"')
+        ->and($forUpdateQueries[0]['bindings'])->toContain((string) $discStage->id)
+        ->and($forUpdateQueries[1]['sql'])->toContain('"deals"')
+        ->and($forUpdateQueries[1]['bindings'])->toContain((string) $deal->id)
+        ->and($forUpdateQueries[2]['sql'])->toContain('"deals"')
+        ->and($forUpdateQueries[2]['bindings'])->toContain((string) $neighborLowerUuid->id)
+        ->and($forUpdateQueries[3]['sql'])->toContain('"deals"')
+        ->and($forUpdateQueries[3]['bindings'])->toContain((string) $neighborHigherUuid->id);
+
+    // UpdateDealAction with stage_id + Director override_gates locks targetStage BEFORE deal
+    $forUpdateQueries = [];
+
+    $this->actingAs($director)->patchJson("/api/internal/crm/deals/{$deal->id}", [
+        'expected_version' => 2,
+        'stage_id' => $negStage->id,
+        'override_gates' => true,
+    ])->assertOk()
+        ->assertJsonPath('stage_id', $negStage->id)
+        ->assertJsonPath('version', 3);
+
+    expect($forUpdateQueries)->toHaveCount(2)
+        ->and($forUpdateQueries[0]['sql'])->toContain('"pipeline_stages"')
+        ->and($forUpdateQueries[0]['bindings'])->toContain((string) $negStage->id)
+        ->and($forUpdateQueries[1]['sql'])->toContain('"deals"')
+        ->and($forUpdateQueries[1]['bindings'])->toContain((string) $deal->id);
 });

@@ -37,21 +37,25 @@ class BroadcastDealBoardInvalidationAction
             $ownerId,
             $accountManagerId,
         ): void {
-            $recipientIds = $this->resolveAuthorizedRecipientIds($dealId, $ownerId, $accountManagerId);
+            try {
+                $recipientIds = $this->resolveAuthorizedRecipientIds($dealId, $ownerId, $accountManagerId);
 
-            foreach ($recipientIds as $recipientUserId) {
-                try {
-                    event(new SiloBoardInvalidated(
-                        recipientUserId: $recipientUserId,
-                        dealId: $dealId,
-                        pipelineId: $pipelineId,
-                        stageId: $stageId,
-                        boardPosition: $boardPosition,
-                        version: $version,
-                    ));
-                } catch (Throwable $e) {
-                    report($e);
+                foreach ($recipientIds as $recipientUserId) {
+                    try {
+                        event(new SiloBoardInvalidated(
+                            recipientUserId: $recipientUserId,
+                            dealId: $dealId,
+                            pipelineId: $pipelineId,
+                            stageId: $stageId,
+                            boardPosition: $boardPosition,
+                            version: $version,
+                        ));
+                    } catch (Throwable $e) {
+                        report($e);
+                    }
                 }
+            } catch (Throwable $e) {
+                report($e);
             }
         });
     }
