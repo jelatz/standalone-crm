@@ -8,20 +8,6 @@ Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function ()
     Route::inertia('/', 'core/pages/WorkspaceHomePage')
         ->name('app.home');
 
-    Route::inertia('/crm/companies', 'core/pages/ModulePlaceholderPage', [
-        'moduleKey' => 'crm.companies',
-        'moduleTitle' => 'Companies',
-        'moduleDescription' => 'Silo-scoped enterprise accounts, lifecycle stages, and custom metadata (Phase 1).',
-        'phaseLabel' => 'Phase 1',
-    ])->name('crm.companies');
-
-    Route::inertia('/crm/contacts', 'core/pages/ModulePlaceholderPage', [
-        'moduleKey' => 'crm.contacts',
-        'moduleTitle' => 'Contacts',
-        'moduleDescription' => 'Stakeholder directory and multi-address email matching (Phase 1).',
-        'phaseLabel' => 'Phase 1',
-    ])->name('crm.contacts');
-
     Route::inertia('/crm/deals', 'core/pages/ModulePlaceholderPage', [
         'moduleKey' => 'crm.deals',
         'moduleTitle' => 'Deals Pipeline',

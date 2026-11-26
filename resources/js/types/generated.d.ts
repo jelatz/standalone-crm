@@ -8,6 +8,17 @@ export type AsyncJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 }
 namespace Attachments {
 namespace Data {
+export type AttachmentSummaryData = {
+id: string,
+original_filename: string,
+mime_type: string,
+size_bytes: number,
+scan_status: App.Modules.Core.Attachments.Enums.AttachmentScanStatus,
+uploaded_by_id: string,
+uploaded_by_name: string | null,
+created_at: string,
+download_url: string,
+};
 export type PresignUploadRequestData = {
 filename: string,
 mime_type: string,
@@ -39,28 +50,44 @@ roles: string[],
 permissions: string[],
 };
 }
+namespace Enums {
+export type OidcProviderEnum = 'google' | 'microsoft';
+}
 }
 namespace Rbac {
+namespace Data {
+export type EntityCollaboratorData = {
+id: string,
+user_id: string,
+user_name: string | null,
+user_email: string | null,
+access_level: App.Modules.Core.Rbac.Enums.CollaboratorAccessLevel,
+role_label: App.Modules.Core.Rbac.Enums.CollaboratorRoleLabel,
+granted_by_id: string,
+granted_by_name: string | null,
+created_at: string,
+};
+export type GrantCollaboratorData = {
+user_id: string,
+access_level: App.Modules.Core.Rbac.Enums.CollaboratorAccessLevel,
+role_label: App.Modules.Core.Rbac.Enums.CollaboratorRoleLabel,
+};
+}
 namespace Enums {
 export type CollaboratorAccessLevel = 'viewer' | 'editor' | 'manager';
 export type CollaboratorRoleLabel = 'account_manager' | 'project_manager' | 'sales_overlay' | 'support_lead' | 'it_lead' | 'observer';
 export type PermissionEnum = 'companies.view' | 'companies.create' | 'companies.update' | 'companies.delete' | 'contacts.view' | 'contacts.create' | 'contacts.update' | 'contacts.delete' | 'deals.view' | 'deals.create' | 'deals.update' | 'deals.delete' | 'deals.move_stage' | 'deals.override_gates' | 'pipelines.view' | 'pipelines.manage' | 'custom_fields.view' | 'custom_fields.manage' | 'handoffs.view' | 'handoffs.submit' | 'handoffs.review' | 'handoffs.approve' | 'handoffs.request_info' | 'projects.view' | 'projects.create' | 'projects.update' | 'projects.delete' | 'projects.manage_templates' | 'tasks.view' | 'tasks.create' | 'tasks.update' | 'tasks.delete' | 'tasks.comment' | 'mailboxes.view_shared' | 'mailboxes.reply_shared' | 'mailboxes.assign_shared' | 'mailboxes.manage_all' | 'mailboxes.connect_personal' | 'chat.view' | 'chat.send' | 'chat.manage_channels' | 'chat.admin' | 'admin.users' | 'admin.system_health';
-export type RoleEnum = 'superadmin' | 'admin' | 'director' | 'operations_manager' | 'sales' | 'account_manager' | 'project_manager' | 'support' | 'it';
+export type RoleEnum = 'admin' | 'director' | 'operations_manager' | 'sales' | 'account_manager' | 'project_manager' | 'support' | 'it';
 }
 }
 namespace Users {
 namespace Data {
 export type UserSummaryData = {
 id: string,
-employee_code: string,
 name: string,
 email: string,
+employee_code: string,
 job_title: string | null,
-department_id: string,
-department_name: string,
-status: string,
-roles: string[],
-created_at: string | null,
 };
 }
 namespace Enums {
@@ -70,8 +97,128 @@ export type UserStatusEnum = 'active' | 'suspended' | 'offboarded';
 }
 namespace Crm {
 namespace Companies {
+namespace Data {
+export type CompanyDetailData = {
+id: string,
+name: string,
+domain: string | null,
+lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
+industry: string | null,
+employee_range: string | null,
+annual_revenue_cents: number | null,
+billing_address: Record<string, any>,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type CompanyFilterData = {
+search: string | null,
+lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum | null,
+owner_id: string | null,
+custom_fields: Record<string, any> | null,
+sort_by: string | null,
+sort_dir: string | null,
+page: number | null,
+per_page: number | null,
+};
+export type CompanyListItemData = {
+id: string,
+name: string,
+domain: string | null,
+lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
+industry: string | null,
+employee_range: string | null,
+annual_revenue_cents: number | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+contacts_count: number,
+deals_count: number,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type UpsertCompanyData = {
+name: undefined | string,
+domain: undefined | string | null,
+lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum | undefined,
+industry: undefined | string | null,
+employee_range: undefined | string | null,
+annual_revenue_cents: undefined | number | null,
+billing_address: Record<string, any> | undefined | null,
+account_manager_id: undefined | string | null,
+custom_fields: Record<string, any> | undefined,
+};
+}
 namespace Enums {
 export type CompanyLifecycleStageEnum = 'lead' | 'prospect' | 'active_client' | 'churned' | 'partner';
+}
+}
+namespace Contacts {
+namespace Data {
+export type ContactDetailData = {
+id: string,
+company_id: string | null,
+company_name: string | null,
+company_domain: string | null,
+owner_id: string,
+owner_name: string | null,
+first_name: string,
+last_name: string,
+full_name: string,
+primary_email: string | null,
+secondary_emails: string[],
+phones: any[],
+job_title: string | null,
+is_primary_contact: boolean,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type ContactFilterData = {
+search: string | null,
+company_id: string | null,
+owner_id: string | null,
+custom_fields: Record<string, any> | null,
+sort_by: string | null,
+sort_dir: string | null,
+page: number | null,
+per_page: number | null,
+};
+export type ContactListItemData = {
+id: string,
+company_id: string | null,
+company_name: string | null,
+owner_id: string,
+owner_name: string | null,
+first_name: string,
+last_name: string,
+full_name: string,
+primary_email: string | null,
+secondary_emails: string[],
+phones: any[],
+job_title: string | null,
+is_primary_contact: boolean,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type UpsertContactData = {
+company_id: undefined | string | null,
+first_name: undefined | string,
+last_name: undefined | string,
+primary_email: undefined | string | null,
+secondary_emails: string[] | undefined | null,
+phones: any[] | undefined | null,
+job_title: undefined | string | null,
+is_primary_contact: undefined | boolean,
+custom_fields: Record<string, any> | undefined,
+};
 }
 }
 namespace CustomFields {
@@ -108,6 +255,29 @@ export type CustomFieldTypeEnum = 'text' | 'textarea' | 'number' | 'currency' | 
 }
 }
 namespace Deals {
+namespace Data {
+export type RelatedDealData = {
+id: string,
+company_id: string,
+primary_contact_id: string | null,
+pipeline_id: string,
+pipeline_name: string | null,
+stage_id: string,
+stage_name: string | null,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+title: string,
+amount_cents: number,
+currency: string,
+expected_close_date: string | null,
+won_at: string | null,
+lost_at: string | null,
+updated_at: string,
+};
+}
 namespace Enums {
 export type DealStakeholderRoleEnum = 'decision_maker' | 'champion' | 'billing' | 'technical_buyer' | 'influencer';
 }
