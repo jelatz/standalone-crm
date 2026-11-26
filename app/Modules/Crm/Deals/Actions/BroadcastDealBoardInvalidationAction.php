@@ -98,7 +98,7 @@ class BroadcastDealBoardInvalidationAction
             ->with(['roles.permissions', 'permissions'])
             ->get()
             ->filter(static fn (User $user): bool => ! $user->trashed()
-                && ($user->hasRole(RoleEnum::Admin->value) || $user->checkPermissionTo(PermissionEnum::DealsView->value)))
+                && ($user->hasAnyRole([RoleEnum::Superadmin->value, RoleEnum::Admin->value]) || $user->checkPermissionTo(PermissionEnum::DealsView->value)))
             ->pluck('id')
             ->map(static fn (mixed $id): string => (string) $id)
             ->unique()

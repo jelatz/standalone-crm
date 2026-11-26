@@ -860,6 +860,11 @@ describe('CRM Workspace Components & Interactions', () => {
                         email: 'devon.alvarez@company.internal',
                         employee_code: 'EMP-0204',
                         job_title: 'Account Executive',
+                        department_id: 'dept-sales',
+                        department_name: 'Revenue',
+                        status: 'active',
+                        roles: ['sales'],
+                        created_at: '2026-11-01T00:00:00+00:00',
                     },
                 ],
                 errors: {

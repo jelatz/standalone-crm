@@ -44,6 +44,7 @@ class LoadEntityContextAction
         }
 
         $query = User::query()
+            ->with(['department:id,name', 'roles:id,name'])
             ->where('status', UserStatusEnum::Active->value)
             ->orderBy('name');
 
@@ -52,7 +53,7 @@ class LoadEntityContextAction
         }
 
         return $query
-            ->get(['id', 'name', 'email', 'employee_code', 'job_title'])
+            ->get(['id', 'name', 'email', 'employee_code', 'job_title', 'department_id', 'status', 'created_at'])
             ->map(static fn (User $user): UserSummaryData => UserSummaryData::fromModel($user))
             ->values()
             ->all();

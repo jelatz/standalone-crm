@@ -50,7 +50,7 @@ class NotePolicy
             return false;
         }
 
-        if ($user->hasRole(RoleEnum::Admin->value)) {
+        if ($user->hasAnyRole([RoleEnum::Superadmin->value, RoleEnum::Admin->value])) {
             return true;
         }
 

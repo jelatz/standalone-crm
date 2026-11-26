@@ -814,3 +814,46 @@ it('denies NotePolicy update and delete for demoted Viewer authors, Support auth
         ->and(Gate::forUser($repB)->allows('update', $coLinkedNote))->toBeFalse()
         ->and(Gate::forUser($repB)->allows('delete', $coLinkedNote))->toBeFalse();
 });
+
+it('grants superadmin full parity with admin across CRM silo queries, policies, pipelines, and custom fields', function (): void {
+    $this->seed(CrmDefaultsSeeder::class);
+    $dept = Department::query()->create(['name' => 'Executive', 'slug' => 'crm-superadmin-exec']);
+
+    $superadmin = createCrmTestUser($dept, 'EMP-SA-1', 'superadmin.crm@acme.internal', RoleEnum::Superadmin);
+    $rep = createCrmTestUser($dept, 'EMP-SA-REP', 'rep.sa@acme.internal', RoleEnum::Sales);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
+    $customField = CustomFieldDefinition::query()->where('entity_type', 'company')->firstOrFail();
+
+    $company = Company::query()->create([
+        'name' => 'Cross-Silo Enterprise',
+        'owner_id' => $rep->id,
+    ]);
+    $deal = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $rep->id,
+        'title' => 'Enterprise Expansion',
+        'stage_entered_at' => now(),
+    ]);
+    $note = Note::query()->create([
+        'author_id' => $rep->id,
+        'body_json' => ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Rep note']]]]],
+        'body_text' => 'Rep note',
+    ]);
+
+    expect(Company::query()->visibleTo($superadmin)->pluck('id')->all())->toContain($company->id)
+        ->and(Deal::query()->visibleTo($superadmin)->pluck('id')->all())->toContain($deal->id)
+        ->and(Gate::forUser($superadmin)->allows('view', $company))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('update', $company))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('view', $deal))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('update', $deal))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('view', $note))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('update', $note))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('create', Pipeline::class))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('update', $pipeline))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('create', CustomFieldDefinition::class))->toBeTrue()
+        ->and(Gate::forUser($superadmin)->allows('update', $customField))->toBeTrue();
+});

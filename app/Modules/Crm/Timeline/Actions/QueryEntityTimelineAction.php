@@ -69,7 +69,7 @@ class QueryEntityTimelineAction
             : null;
 
         $batchSize = max($clampedLimit * 2, 50);
-        $isAdmin = $viewer->hasRole(RoleEnum::Admin->value);
+        $isAdmin = $viewer->hasAnyRole([RoleEnum::Superadmin->value, RoleEnum::Admin->value]);
         $canViewDeals = Gate::forUser($viewer)->allows('viewAny', Deal::class);
         $canViewContacts = Gate::forUser($viewer)->allows('viewAny', Contact::class);
         $canViewCompanies = Gate::forUser($viewer)->allows('viewAny', Company::class);
