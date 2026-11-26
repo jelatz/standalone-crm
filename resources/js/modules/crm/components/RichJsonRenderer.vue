@@ -97,7 +97,7 @@ function renderNode(node: ProseMirrorNode, index: number): VNode | null {
             return h('p', { key, class: 'min-h-[1em] break-words' }, children.length > 0 ? children : [h('br')]);
         case 'heading': {
             const rawLevel = Number(node.attrs?.level ?? 2);
-            const level = Number.isFinite(rawLevel) ? Math.min(6, Math.max(1, rawLevel)) : 2;
+            const level = Number.isFinite(rawLevel) ? Math.min(6, Math.max(1, Math.trunc(rawLevel))) : 2;
             const tag = `h${level}`;
             return h(tag, { key, class: 'font-semibold tracking-[-0.01em] text-primary' }, children);
         }
@@ -109,7 +109,7 @@ function renderNode(node: ProseMirrorNode, index: number): VNode | null {
                 'ol',
                 {
                     key,
-                    start: Number.isFinite(start) && start >= 1 ? start : 1,
+                    start: Number.isFinite(start) && start >= 1 ? Math.trunc(start) : 1,
                     class: 'list-decimal space-y-0.5 pl-5',
                 },
                 children,

@@ -140,6 +140,7 @@ function createMockEcho(): {
 
     const channelStub: RealtimeChannelLike = {
         listen: vi.fn(() => channelStub),
+        stopListening: vi.fn(() => channelStub),
         notification: vi.fn(() => channelStub),
         error: vi.fn(() => channelStub),
     };

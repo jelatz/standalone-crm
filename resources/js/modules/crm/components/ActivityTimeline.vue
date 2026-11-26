@@ -27,11 +27,15 @@ const props = withDefaults(
         linkableId: string;
         initialPage: App.Modules.Crm.Timeline.Data.TimelinePageData;
         canCreateNote?: boolean;
+        canManageNotes?: boolean;
     }>(),
     {
-        canCreateNote: true,
+        canCreateNote: false,
+        canManageNotes: undefined,
     },
 );
+
+const canMutateNotes = computed(() => props.canManageNotes ?? props.canCreateNote);
 
 const items = ref<App.Modules.Crm.Timeline.Data.ActivityData[]>([...props.initialPage.items]);
 const nextCursor = ref<string | null>(props.initialPage.next_cursor);
@@ -130,7 +134,7 @@ function iconForActivity(activityType: App.Modules.Crm.Timeline.Enums.ActivityTy
 }
 
 async function handleCreateNote(payload: { body_json: ProseMirrorDoc; is_pinned: boolean }): Promise<void> {
-    if (creatingNote.value) {
+    if (!props.canCreateNote || creatingNote.value) {
         return;
     }
 
@@ -174,7 +178,7 @@ async function handleCreateNote(payload: { body_json: ProseMirrorDoc; is_pinned:
 }
 
 async function handleTogglePin(note: App.Modules.Crm.Notes.Data.NoteData): Promise<void> {
-    if (busyNoteId.value) {
+    if (!canMutateNotes.value || busyNoteId.value) {
         return;
     }
 
@@ -194,7 +198,7 @@ async function handleTogglePin(note: App.Modules.Crm.Notes.Data.NoteData): Promi
 }
 
 async function handleDeleteNote(noteId: string): Promise<void> {
-    if (busyNoteId.value) {
+    if (!canMutateNotes.value || busyNoteId.value) {
         return;
     }
 
@@ -292,7 +296,7 @@ async function loadMore(): Promise<void> {
                                 {{ formatDateTime(entry.note?.created_at ?? entry.occurred_at) }}
                             </span>
                         </div>
-                        <div v-if="entry.note" class="flex shrink-0 items-center gap-1">
+                        <div v-if="entry.note && canMutateNotes" class="flex shrink-0 items-center gap-1">
                             <button
                                 type="button"
                                 aria-label="Unpin note"
@@ -407,7 +411,7 @@ async function loadMore(): Promise<void> {
                                 {{ formatDateTime(entry.occurred_at) }}
                             </span>
 
-                            <template v-if="entry.note">
+                            <template v-if="entry.note && canMutateNotes">
                                 <button
                                     type="button"
                                     :aria-label="entry.note.is_pinned ? 'Unpin note' : 'Pin note'"

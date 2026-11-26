@@ -6,6 +6,7 @@ export type ReverbEchoInstance = Echo<'reverb'>;
 
 export interface RealtimeChannelLike {
     listen(event: string, callback: CallableFunction): this;
+    stopListening(event: string, callback?: CallableFunction): this;
     notification(callback: CallableFunction): this;
     error(callback: CallableFunction): this;
 }

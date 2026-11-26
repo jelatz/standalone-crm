@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -56,19 +56,37 @@ const saveError = ref<string>('');
 const saveSuccess = ref<string>('');
 const fieldErrors = ref<Record<string, string>>({});
 
-const form = ref({
-    name: localCompany.value.name,
-    domain: localCompany.value.domain ?? '',
-    lifecycle_stage: localCompany.value.lifecycle_stage,
-    industry: localCompany.value.industry ?? '',
-    employee_range: localCompany.value.employee_range ?? '',
-    annual_revenue_dollars:
-        localCompany.value.annual_revenue_cents !== null
-            ? String((localCompany.value.annual_revenue_cents / 100).toFixed(2).replace(/\.00$/, ''))
-            : '',
-    account_manager_id: localCompany.value.account_manager_id ?? '',
-    custom_fields: { ...(localCompany.value.custom_fields ?? {}) } as Record<string, any>,
-});
+function buildCompanyFormState(source: App.Modules.Crm.Companies.Data.CompanyDetailData) {
+    return {
+        name: source.name,
+        domain: source.domain ?? '',
+        lifecycle_stage: source.lifecycle_stage,
+        industry: source.industry ?? '',
+        employee_range: source.employee_range ?? '',
+        annual_revenue_dollars:
+            source.annual_revenue_cents !== null
+                ? String((source.annual_revenue_cents / 100).toFixed(2).replace(/\.00$/, ''))
+                : '',
+        account_manager_id: source.account_manager_id ?? '',
+        custom_fields: { ...(source.custom_fields ?? {}) } as Record<string, any>,
+    };
+}
+
+const form = ref(buildCompanyFormState(localCompany.value));
+
+function syncLocalFromCompany(updated: App.Modules.Crm.Companies.Data.CompanyDetailData): void {
+    localCompany.value = {
+        ...updated,
+        custom_fields: { ...(updated.custom_fields ?? {}) },
+    };
+    form.value = buildCompanyFormState(updated);
+}
+
+watch(
+    () => props.company,
+    (nextCompany) => syncLocalFromCompany(nextCompany),
+    { deep: true },
+);
 
 const deleteDialogOpen = ref<boolean>(false);
 const deleting = ref<boolean>(false);
@@ -118,7 +136,7 @@ async function handleSave(): Promise<void> {
             custom_fields: form.value.custom_fields,
         });
 
-        localCompany.value = updated;
+        syncLocalFromCompany(updated);
         saveSuccess.value = 'Company properties updated.';
     } catch (error) {
         if (error instanceof ValidationRequestError) {

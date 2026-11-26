@@ -5,7 +5,7 @@ import { AlertCircle, AlertTriangle, Calendar, RefreshCw } from 'lucide-vue-next
 import Badge, { type BadgeVariant } from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import StageGateModal, { type StageGateSubmitPayload } from './StageGateModal.vue';
-import { getEcho } from '@/echo';
+import { getEcho, type RealtimeChannelLike } from '@/echo';
 import { useAuthStore } from '@/stores/auth.store';
 import {
     crmApi,
@@ -464,10 +464,12 @@ function refreshBoardFromServer(): void {
     });
 }
 
+const BOARD_INVALIDATED_EVENT = '.App\\Modules\\Crm\\Deals\\Events\\SiloBoardInvalidated';
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let unmounted = false;
+let subscribedChannel: RealtimeChannelLike | null = null;
 
-function scheduleRealtimeReload(payload: unknown): void {
+function handleBoardInvalidated(payload: unknown): void {
     if (unmounted) {
         return;
     }
@@ -494,15 +496,18 @@ onMounted(() => {
     const userId = authStore.user?.id;
     const echo = getEcho();
     if (echo && userId) {
-        echo.private(`user.${userId}`).listen(
-            '.App\\Modules\\Crm\\Deals\\Events\\SiloBoardInvalidated',
-            scheduleRealtimeReload,
-        );
+        const channel = echo.private(`user.${userId}`);
+        channel.listen(BOARD_INVALIDATED_EVENT, handleBoardInvalidated);
+        subscribedChannel = channel;
     }
 });
 
 onUnmounted(() => {
     unmounted = true;
+    if (subscribedChannel !== null) {
+        subscribedChannel.stopListening(BOARD_INVALIDATED_EVENT, handleBoardInvalidated);
+        subscribedChannel = null;
+    }
     if (reloadTimer !== null) {
         clearTimeout(reloadTimer);
         reloadTimer = null;

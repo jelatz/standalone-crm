@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, useId } from 'vue';
+import { ref, useId, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -71,17 +71,37 @@ function formatPhoneEntry(phone: unknown): string {
     return '';
 }
 
-const form = ref({
-    company_id: localContact.value.company_id ?? '',
-    first_name: localContact.value.first_name,
-    last_name: localContact.value.last_name,
-    primary_email: localContact.value.primary_email ?? '',
-    secondary_emails: [...localContact.value.secondary_emails],
-    phones: localContact.value.phones.map(formatPhoneEntry).filter((p) => p !== ''),
-    job_title: localContact.value.job_title ?? '',
-    is_primary_contact: localContact.value.is_primary_contact,
-    custom_fields: { ...(localContact.value.custom_fields ?? {}) } as Record<string, any>,
-});
+function buildContactFormState(source: App.Modules.Crm.Contacts.Data.ContactDetailData) {
+    return {
+        company_id: source.company_id ?? '',
+        first_name: source.first_name,
+        last_name: source.last_name,
+        primary_email: source.primary_email ?? '',
+        secondary_emails: [...(source.secondary_emails ?? [])],
+        phones: (source.phones ?? []).map(formatPhoneEntry).filter((p) => p !== ''),
+        job_title: source.job_title ?? '',
+        is_primary_contact: source.is_primary_contact,
+        custom_fields: { ...(source.custom_fields ?? {}) } as Record<string, any>,
+    };
+}
+
+const form = ref(buildContactFormState(localContact.value));
+
+function syncLocalFromContact(updated: App.Modules.Crm.Contacts.Data.ContactDetailData): void {
+    localContact.value = {
+        ...updated,
+        secondary_emails: [...(updated.secondary_emails ?? [])],
+        phones: [...(updated.phones ?? [])],
+        custom_fields: { ...(updated.custom_fields ?? {}) },
+    };
+    form.value = buildContactFormState(updated);
+}
+
+watch(
+    () => props.contact,
+    (nextContact) => syncLocalFromContact(nextContact),
+    { deep: true },
+);
 
 const saving = ref<boolean>(false);
 const saveError = ref<string>('');
@@ -126,9 +146,14 @@ async function handleSave(): Promise<void> {
         .map((phone) => phone.trim())
         .filter((phone) => phone !== '');
 
+    const initialCompanyId = localContact.value.company_id ?? '';
+    const companyChanged =
+        !localContact.value.has_masked_company &&
+        form.value.company_id !== initialCompanyId;
+
     try {
         const updated = await crmApi.updateContact(localContact.value.id, {
-            company_id: form.value.company_id || null,
+            ...(companyChanged ? { company_id: form.value.company_id || null } : {}),
             first_name: form.value.first_name.trim(),
             last_name: form.value.last_name.trim(),
             primary_email: form.value.primary_email.trim() || null,
@@ -139,9 +164,7 @@ async function handleSave(): Promise<void> {
             custom_fields: form.value.custom_fields,
         });
 
-        localContact.value = updated;
-        form.value.secondary_emails = [...updated.secondary_emails];
-        form.value.phones = updated.phones.map(formatPhoneEntry).filter((p) => p !== '');
+        syncLocalFromContact(updated);
         saveSuccess.value = 'Contact details saved.';
     } catch (error) {
         if (error instanceof ValidationRequestError) {
@@ -265,7 +288,18 @@ async function handleDelete(): Promise<void> {
                         </div>
                     </div>
 
-                    <div v-if="props.can.update">
+                    <div v-if="localContact.has_masked_company">
+                        <span class="mb-1 block text-[12px] font-medium text-secondary">
+                            Company
+                        </span>
+                        <div
+                            data-testid="contact-masked-company"
+                            class="rounded-[6px] border border-default bg-subtle px-2.5 py-1.5 text-[12px] text-secondary"
+                        >
+                            Restricted (outside your silo)
+                        </div>
+                    </div>
+                    <div v-else-if="props.can.update">
                         <label :for="`ct-company-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
                             Company
                         </label>
@@ -465,6 +499,13 @@ async function handleDelete(): Promise<void> {
                             </Link>
                             <Badge variant="neutral">{{ formatEnumLabel(props.company.lifecycle_stage) }}</Badge>
                         </div>
+                        <p
+                            v-else-if="localContact.has_masked_company"
+                            data-testid="contact-linked-company-masked"
+                            class="text-[12px] text-secondary"
+                        >
+                            Restricted (outside your silo)
+                        </p>
                         <p v-else class="text-[12px] text-muted">
                             No visible company associated.
                         </p>

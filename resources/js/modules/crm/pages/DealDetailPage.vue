@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -154,6 +154,20 @@ function syncLocalFromDeal(updated: App.Modules.Crm.Deals.Data.DealDetailData): 
     };
 }
 
+watch(
+    () => props.deal,
+    (nextDeal) => syncLocalFromDeal(nextDeal),
+    { deep: true },
+);
+
+watch(
+    () => props.stakeholders,
+    (next) => {
+        localStakeholders.value = [...next];
+    },
+    { deep: true },
+);
+
 async function handleSaveProperties(): Promise<void> {
     if (!props.can.update || saving.value) {
         return;
@@ -171,12 +185,24 @@ async function handleSaveProperties(): Promise<void> {
             ? Math.round(Number(amountRaw) * 100)
             : 0;
 
+    const initialCompanyId = localDeal.value.company_id ?? '';
+    const companyChanged =
+        !localDeal.value.has_masked_company &&
+        form.value.company_id !== initialCompanyId &&
+        form.value.company_id !== '';
+
+    const initialPrimaryContactId = localDeal.value.primary_contact_id ?? '';
+    const primaryContactChanged =
+        !localDeal.value.has_masked_primary_contact &&
+        form.value.primary_contact_id !== initialPrimaryContactId;
+
     try {
         const updated = await crmApi.updateDeal(localDeal.value.id, {
             expected_version: localDeal.value.version,
-            company_id: form.value.company_id || undefined,
-            primary_contact_id: form.value.primary_contact_id || null,
-            stage_id: undefined,
+            ...(companyChanged ? { company_id: form.value.company_id } : {}),
+            ...(primaryContactChanged
+                ? { primary_contact_id: form.value.primary_contact_id || null }
+                : {}),
             account_manager_id: form.value.account_manager_id || null,
             title: form.value.title.trim(),
             amount_cents: amountCents,
@@ -313,6 +339,8 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
 function refreshDealFromServer(): void {
     router.reload({
         onSuccess: () => {
+            syncLocalFromDeal(props.deal);
+            localStakeholders.value = [...props.stakeholders];
             conflictError.value = '';
             saveError.value = '';
         },
@@ -531,7 +559,12 @@ async function handleDeleteDeal(): Promise<void> {
                     <p class="text-[12px] text-secondary">{{ conflictError }}</p>
                 </div>
             </div>
-            <Button variant="secondary" size="sm" @click="refreshDealFromServer">
+            <Button
+                variant="secondary"
+                size="sm"
+                data-testid="deal-detail-reload-latest"
+                @click="refreshDealFromServer"
+            >
                 <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
                 <span>Reload Latest</span>
             </Button>
@@ -580,66 +613,100 @@ async function handleDeleteDeal(): Promise<void> {
                     </div>
 
                     <div>
-                        <label :for="`deal-company-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
-                            Company
-                        </label>
-                        <select
-                            v-if="props.can.update && props.companies.length > 0"
-                            :id="`deal-company-${instanceId}`"
-                            v-model="form.company_id"
-                            :disabled="saving"
-                            class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary focus-visible:outline-2 focus-visible:outline-accent-primary"
-                        >
-                            <option
-                                v-for="companyOption in props.companies"
-                                :key="companyOption.id"
-                                :value="companyOption.id"
+                        <template v-if="localDeal.has_masked_company">
+                            <span class="mb-1 block text-[12px] font-medium text-secondary">
+                                Company
+                            </span>
+                            <div
+                                data-testid="deal-masked-company"
+                                class="rounded-[6px] border border-default bg-subtle px-2.5 py-1.5 text-[12px] text-secondary"
                             >
-                                {{ companyOption.name }}
-                            </option>
-                        </select>
-                        <div v-else class="text-[13px] text-primary">
-                            <Link
-                                v-if="props.company"
-                                :href="`/app/crm/companies/${props.company.id}`"
-                                class="font-medium text-accent-primary hover:underline"
+                                Restricted (outside your silo)
+                            </div>
+                        </template>
+                        <template v-else-if="props.can.update && props.companies.length > 0">
+                            <label :for="`deal-company-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
+                                Company
+                            </label>
+                            <select
+                                :id="`deal-company-${instanceId}`"
+                                v-model="form.company_id"
+                                :disabled="saving"
+                                class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary focus-visible:outline-2 focus-visible:outline-accent-primary"
                             >
-                                {{ props.company.name }}
-                            </Link>
-                            <span v-else class="text-muted">Restricted account</span>
-                        </div>
+                                <option
+                                    v-for="companyOption in props.companies"
+                                    :key="companyOption.id"
+                                    :value="companyOption.id"
+                                >
+                                    {{ companyOption.name }}
+                                </option>
+                            </select>
+                        </template>
+                        <template v-else>
+                            <span class="mb-1 block text-[12px] font-medium text-secondary">
+                                Company
+                            </span>
+                            <div class="text-[13px] text-primary">
+                                <Link
+                                    v-if="props.company"
+                                    :href="`/app/crm/companies/${props.company.id}`"
+                                    class="font-medium text-accent-primary hover:underline"
+                                >
+                                    {{ props.company.name }}
+                                </Link>
+                                <span v-else class="text-muted">Restricted account</span>
+                            </div>
+                        </template>
                     </div>
 
                     <div>
-                        <label :for="`deal-primary-contact-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
-                            Primary Contact
-                        </label>
-                        <select
-                            v-if="props.can.update"
-                            :id="`deal-primary-contact-${instanceId}`"
-                            v-model="form.primary_contact_id"
-                            :disabled="saving"
-                            class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary focus-visible:outline-2 focus-visible:outline-accent-primary"
-                        >
-                            <option value="">None</option>
-                            <option
-                                v-for="contactOption in props.contacts"
-                                :key="contactOption.id"
-                                :value="contactOption.id"
+                        <template v-if="localDeal.has_masked_primary_contact">
+                            <span class="mb-1 block text-[12px] font-medium text-secondary">
+                                Primary Contact
+                            </span>
+                            <div
+                                data-testid="deal-masked-primary-contact"
+                                class="rounded-[6px] border border-default bg-subtle px-2.5 py-1.5 text-[12px] text-secondary"
                             >
-                                {{ contactOption.full_name }}
-                            </option>
-                        </select>
-                        <div v-else class="text-[13px] text-primary">
-                            <Link
-                                v-if="props.primaryContact"
-                                :href="`/app/crm/contacts/${props.primaryContact.id}`"
-                                class="font-medium text-accent-primary hover:underline"
+                                Restricted (outside your silo)
+                            </div>
+                        </template>
+                        <template v-else-if="props.can.update">
+                            <label :for="`deal-primary-contact-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
+                                Primary Contact
+                            </label>
+                            <select
+                                :id="`deal-primary-contact-${instanceId}`"
+                                v-model="form.primary_contact_id"
+                                :disabled="saving"
+                                class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary focus-visible:outline-2 focus-visible:outline-accent-primary"
                             >
-                                {{ props.primaryContact.full_name }}
-                            </Link>
-                            <span v-else class="text-muted">None</span>
-                        </div>
+                                <option value="">None</option>
+                                <option
+                                    v-for="contactOption in props.contacts"
+                                    :key="contactOption.id"
+                                    :value="contactOption.id"
+                                >
+                                    {{ contactOption.full_name }}
+                                </option>
+                            </select>
+                        </template>
+                        <template v-else>
+                            <span class="mb-1 block text-[12px] font-medium text-secondary">
+                                Primary Contact
+                            </span>
+                            <div class="text-[13px] text-primary">
+                                <Link
+                                    v-if="props.primaryContact"
+                                    :href="`/app/crm/contacts/${props.primaryContact.id}`"
+                                    class="font-medium text-accent-primary hover:underline"
+                                >
+                                    {{ props.primaryContact.full_name }}
+                                </Link>
+                                <span v-else class="text-muted">None</span>
+                            </div>
+                        </template>
                     </div>
 
                     <div class="grid grid-cols-3 gap-2">

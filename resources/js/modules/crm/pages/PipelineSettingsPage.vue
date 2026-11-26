@@ -382,13 +382,11 @@ async function handleSaveCustomField(): Promise<void> {
               .filter(Boolean)
         : null;
 
-    const payload: App.Modules.Crm.CustomFields.Data.UpsertCustomFieldDefinitionData = {
-        entity_type: customFieldForm.value.entity_type,
+    const sharedPayload = {
         pipeline_id:
             customFieldForm.value.entity_type === 'deal'
                 ? customFieldForm.value.pipeline_id || null
                 : null,
-        key: customFieldForm.value.key.trim(),
         label: customFieldForm.value.label.trim(),
         field_type: customFieldForm.value.field_type,
         options: parsedOptions,
@@ -402,8 +400,12 @@ async function handleSaveCustomField(): Promise<void> {
 
     try {
         const saved = editingFieldId.value
-            ? await crmApi.updateCustomField(editingFieldId.value, payload)
-            : await crmApi.createCustomField(payload);
+            ? await crmApi.updateCustomField(editingFieldId.value, sharedPayload)
+            : await crmApi.createCustomField({
+                  ...sharedPayload,
+                  entity_type: customFieldForm.value.entity_type,
+                  key: customFieldForm.value.key.trim(),
+              });
 
         if (editingFieldId.value) {
             localFields.value = localFields.value.map((f) => (f.id === saved.id ? saved : f));
@@ -1037,7 +1039,7 @@ async function handleDeleteCustomField(fieldId: string): Promise<void> {
                             :id="`cf-entity-${instanceId}`"
                             v-model="customFieldForm.entity_type"
                             :disabled="fieldSaving || Boolean(editingFieldId)"
-                            class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary"
+                            class="h-8 w-full rounded-[6px] border border-default bg-surface px-2.5 text-[13px] text-primary disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <option v-for="etype in entityTypes" :key="etype" :value="etype">
                                 {{ formatEnumLabel(etype) }}
@@ -1083,9 +1085,18 @@ async function handleDeleteCustomField(fieldId: string): Promise<void> {
                             v-model="customFieldForm.key"
                             placeholder="deployment_region"
                             class="font-mono"
-                            :disabled="fieldSaving"
+                            :disabled="fieldSaving || Boolean(editingFieldId)"
+                            :described-by="editingFieldId ? `cf-key-hint-${instanceId}` : undefined"
                             :error-message="customFieldFormErrors.key ?? ''"
                         />
+                        <p
+                            v-if="editingFieldId"
+                            :id="`cf-key-hint-${instanceId}`"
+                            data-testid="custom-field-key-hint"
+                            class="mt-1 text-[11px] text-muted"
+                        >
+                            Machine key cannot be renamed after creation.
+                        </p>
                     </div>
 
                     <div v-if="customFieldForm.entity_type === 'deal'" class="sm:col-span-2">

@@ -71,18 +71,30 @@ interface ValidationPayload {
     missing_custom_fields?: string[];
 }
 
-function readCsrfToken(): string | null {
+function readXsrfCookieToken(): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+    if (!match) {
+        return null;
+    }
+
+    try {
+        return decodeURIComponent(match[1]);
+    } catch {
+        return match[1];
+    }
+}
+
+function readMetaCsrfToken(): string | null {
     if (typeof document === 'undefined') {
         return null;
     }
 
     const meta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
-    if (meta?.content) {
-        return meta.content;
-    }
-
-    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : null;
+    return meta?.content ? meta.content : null;
 }
 
 const httpClient: AxiosInstance = axios.create({
@@ -94,14 +106,29 @@ const httpClient: AxiosInstance = axios.create({
     },
 });
 
+export const crmHttpClient = httpClient;
+
 httpClient.interceptors.request.use((config) => {
-    const token = readCsrfToken();
-    if (token && config.headers) {
-        config.headers['X-CSRF-TOKEN'] = token;
+    if (config.headers) {
+        const xsrfToken = readXsrfCookieToken();
+        if (xsrfToken) {
+            config.headers['X-XSRF-TOKEN'] = xsrfToken;
+        } else {
+            const metaToken = readMetaCsrfToken();
+            if (metaToken) {
+                config.headers['X-CSRF-TOKEN'] = metaToken;
+            }
+        }
     }
 
     return config;
 });
+
+type UndefinedAsOptional<T> = {
+    [K in keyof T as undefined extends T[K] ? never : K]: T[K];
+} & {
+    [K in keyof T as undefined extends T[K] ? K : never]?: T[K];
+};
 
 function normalizeErrorsMap(rawErrors?: Record<string, string[] | string>): FieldValidationErrors {
     if (!rawErrors || typeof rawErrors !== 'object') {
@@ -215,7 +242,10 @@ export const crmApi = {
             httpClient.post('/api/internal/crm/companies', payload),
         );
     },
-    updateCompany(companyId: string, payload: App.Modules.Crm.Companies.Data.UpsertCompanyData) {
+    updateCompany(
+        companyId: string,
+        payload: UndefinedAsOptional<App.Modules.Crm.Companies.Data.UpsertCompanyData>,
+    ) {
         return requestData<App.Modules.Crm.Companies.Data.CompanyDetailData>(() =>
             httpClient.patch(`/api/internal/crm/companies/${companyId}`, payload),
         );
@@ -242,7 +272,10 @@ export const crmApi = {
             httpClient.post('/api/internal/crm/contacts', payload),
         );
     },
-    updateContact(contactId: string, payload: App.Modules.Crm.Contacts.Data.UpsertContactData) {
+    updateContact(
+        contactId: string,
+        payload: UndefinedAsOptional<App.Modules.Crm.Contacts.Data.UpsertContactData>,
+    ) {
         return requestData<App.Modules.Crm.Contacts.Data.ContactDetailData>(() =>
             httpClient.patch(`/api/internal/crm/contacts/${contactId}`, payload),
         );
@@ -269,7 +302,10 @@ export const crmApi = {
             httpClient.post('/api/internal/crm/deals', payload),
         );
     },
-    updateDeal(dealId: string, payload: App.Modules.Crm.Deals.Data.UpdateDealData) {
+    updateDeal(
+        dealId: string,
+        payload: UndefinedAsOptional<App.Modules.Crm.Deals.Data.UpdateDealData>,
+    ) {
         return requestData<App.Modules.Crm.Deals.Data.DealDetailData>(() =>
             httpClient.patch(`/api/internal/crm/deals/${dealId}`, payload),
         );
@@ -373,7 +409,10 @@ export const crmApi = {
             httpClient.post('/api/internal/crm/pipelines', payload),
         );
     },
-    updatePipeline(pipelineId: string, payload: App.Modules.Crm.Pipelines.Data.UpsertPipelineData) {
+    updatePipeline(
+        pipelineId: string,
+        payload: UndefinedAsOptional<App.Modules.Crm.Pipelines.Data.UpsertPipelineData>,
+    ) {
         return requestData<App.Modules.Crm.Pipelines.Data.PipelineData>(() =>
             httpClient.patch(`/api/internal/crm/pipelines/${pipelineId}`, payload),
         );
@@ -386,7 +425,7 @@ export const crmApi = {
     updatePipelineStage(
         pipelineId: string,
         stageId: string,
-        payload: App.Modules.Crm.Pipelines.Data.UpsertPipelineStageData,
+        payload: UndefinedAsOptional<App.Modules.Crm.Pipelines.Data.UpsertPipelineStageData>,
     ) {
         return requestData<App.Modules.Crm.Pipelines.Data.PipelineStageData>(() =>
             httpClient.patch(`/api/internal/crm/pipelines/${pipelineId}/stages/${stageId}`, payload),
@@ -406,7 +445,7 @@ export const crmApi = {
     },
     updateCustomField(
         definitionId: string,
-        payload: App.Modules.Crm.CustomFields.Data.UpsertCustomFieldDefinitionData,
+        payload: UndefinedAsOptional<App.Modules.Crm.CustomFields.Data.UpsertCustomFieldDefinitionData>,
     ) {
         return requestData<App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData>(() =>
             httpClient.patch(`/api/internal/crm/custom-fields/${definitionId}`, payload),

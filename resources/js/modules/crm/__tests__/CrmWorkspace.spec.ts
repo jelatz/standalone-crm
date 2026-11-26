@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '@/stores/auth.store';
 import {
     crmApi,
+    crmHttpClient,
     ForbiddenRequestError,
     mapCrmApiError,
     OptimisticLockConflictError,
@@ -79,6 +80,12 @@ import WorkspaceShellLayout from '@/layouts/WorkspaceShellLayout.vue';
 import ActivityTimeline from '@/modules/crm/components/ActivityTimeline.vue';
 import CustomFieldsForm from '@/modules/crm/components/CustomFieldsForm.vue';
 import DealKanbanBoard from '@/modules/crm/components/DealKanbanBoard.vue';
+import RichJsonRenderer from '@/modules/crm/components/RichJsonRenderer.vue';
+import CompanyDetailPage from '@/modules/crm/pages/CompanyDetailPage.vue';
+import ContactDetailPage from '@/modules/crm/pages/ContactDetailPage.vue';
+import DealDetailPage from '@/modules/crm/pages/DealDetailPage.vue';
+import DealsIndexPage from '@/modules/crm/pages/DealsIndexPage.vue';
+import PipelineSettingsPage from '@/modules/crm/pages/PipelineSettingsPage.vue';
 
 function makeUser(permissions: string[] = ['deals.view', 'deals.move_stage']): App.Modules.Core.Auth.Data.AuthenticatedUserData {
     return {
@@ -182,6 +189,8 @@ function makeDealDetailFromCard(
         custom_fields: card.custom_fields,
         created_at: '2026-11-01T10:00:00Z',
         updated_at: '2026-11-26T00:00:00Z',
+        has_masked_company: false,
+        has_masked_primary_contact: false,
         ...overrides,
     };
 }
@@ -223,9 +232,22 @@ function makeBoard(): App.Modules.Crm.Deals.Data.DealKanbanBoardData {
 
 function createMockEcho(): {
     client: RealtimeEchoClient;
+    channelStub: RealtimeChannelLike;
+    stopListeningSpy: ReturnType<typeof vi.fn>;
+    leaveSpy: ReturnType<typeof vi.fn>;
     emitEvent: (eventName: string, payload: unknown) => void;
 } {
     const handlers = new Map<string, CallableFunction[]>();
+    const stopListeningSpy = vi.fn((event: string, cb?: CallableFunction) => {
+        if (cb) {
+            const list = (handlers.get(event) ?? []).filter((item) => item !== cb);
+            handlers.set(event, list);
+        } else {
+            handlers.delete(event);
+        }
+        return channelStub;
+    });
+
     const channelStub: RealtimeChannelLike = {
         listen: vi.fn((event: string, cb: CallableFunction) => {
             const list = handlers.get(event) ?? [];
@@ -233,13 +255,16 @@ function createMockEcho(): {
             handlers.set(event, list);
             return channelStub;
         }),
+        stopListening: stopListeningSpy,
         notification: vi.fn(() => channelStub),
         error: vi.fn(() => channelStub),
     };
 
+    const leaveSpy = vi.fn();
+
     const client: RealtimeEchoClient = {
         private: vi.fn(() => channelStub),
-        leave: vi.fn(),
+        leave: leaveSpy,
         connectionStatus: (): ConnectionStatus => 'connected',
         disconnect: vi.fn(),
         connector: {
@@ -249,6 +274,9 @@ function createMockEcho(): {
 
     return {
         client,
+        channelStub,
+        stopListeningSpy,
+        leaveSpy,
         emitEvent: (eventName: string, payload: unknown) => {
             const list = handlers.get(eventName) ?? [];
             list.forEach((cb) => cb(payload));
@@ -885,5 +913,544 @@ describe('CRM Workspace Components & Interactions', () => {
         authStore.setUser(makeUser(['deals.view', 'custom_fields.manage']));
         await nextTick();
         expect(restrictedWrapper.find('a[href="/app/crm/settings/pipelines"]').exists()).toBe(true);
+    });
+
+    it('syncs DealDetailPage localDeal.version and form when props.deal reloads after 409 Conflict', async () => {
+        const board = makeBoard();
+        const card = board.columns[0].deals[0];
+        const initialDeal = makeDealDetailFromCard(card, {
+            version: 3,
+            title: 'Regional WMS Provisioning',
+            amount_cents: 1200000,
+        });
+        const reloadedDeal = makeDealDetailFromCard(card, {
+            version: 5,
+            title: 'Regional WMS Provisioning (Server v5)',
+            amount_cents: 2850000,
+        });
+
+        const updateSpy = vi
+            .spyOn(crmApi, 'updateDeal')
+            .mockRejectedValueOnce(
+                new OptimisticLockConflictError('Stale deal version.', 5, reloadedDeal),
+            )
+            .mockResolvedValueOnce(
+                makeDealDetailFromCard(card, {
+                    version: 6,
+                    title: 'Regional WMS Provisioning (Server v5)',
+                    amount_cents: 2850000,
+                }),
+            );
+
+        const wrapper = mount(DealDetailPage, {
+            attachTo: document.body,
+            props: {
+                deal: initialDeal,
+                company: {
+                    id: 'comp-1',
+                    name: 'Northwind Logistics',
+                    domain: 'northwind.internal',
+                    lifecycle_stage: 'active_client',
+                },
+                primaryContact: {
+                    id: 'cont-1',
+                    full_name: 'Hannah Kowalski',
+                    primary_email: 'h.kowalski@northwind.internal',
+                    job_title: 'VP Logistics',
+                },
+                pipeline: board.pipeline,
+                stakeholders: [],
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                companies: [{ id: 'comp-1', name: 'Northwind Logistics', domain: 'northwind.internal' }],
+                contacts: [
+                    {
+                        id: 'cont-1',
+                        full_name: 'Hannah Kowalski',
+                        primary_email: 'h.kowalski@northwind.internal',
+                        company_id: 'comp-1',
+                    },
+                ],
+                stakeholderRoles: ['decision_maker'],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['account_manager'],
+                can: {
+                    update: true,
+                    delete: false,
+                    moveStage: true,
+                    overrideGates: false,
+                    manageCollaborators: false,
+                },
+            },
+        });
+        mountedWrappers.push(wrapper);
+        await nextTick();
+
+        expect(wrapper.get('[data-testid="deal-version-badge"]').text()).toBe('v3');
+
+        // Trigger 409 conflict on Save Properties
+        await wrapper.get('aside[aria-label="Deal properties"] form').trigger('submit');
+        await flushPromises();
+        await nextTick();
+
+        expect(wrapper.get('[data-testid="deal-detail-conflict-banner"]').text()).toContain('Version Conflict (409)');
+
+        // Simulate Inertia router.reload updating props.deal and invoking onSuccess
+        mockRouterReload.mockImplementation(async (options?: { onSuccess?: () => void }) => {
+            await wrapper.setProps({ deal: reloadedDeal });
+            options?.onSuccess?.();
+        });
+
+        await wrapper.get('[data-testid="deal-detail-reload-latest"]').trigger('click');
+        await flushPromises();
+        await nextTick();
+
+        expect(mockRouterReload).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[data-testid="deal-detail-conflict-banner"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="deal-version-badge"]').text()).toBe('v5');
+
+        const titleInput = wrapper.get<HTMLInputElement>('aside[aria-label="Deal properties"] input[type="text"]');
+        const amountInput = wrapper.get<HTMLInputElement>('aside[aria-label="Deal properties"] input[type="number"]');
+        expect(titleInput.element.value).toBe('Regional WMS Provisioning (Server v5)');
+        expect(amountInput.element.value).toBe('28500');
+
+        // Next save sends updated expected_version: 5 instead of stale version 3
+        await wrapper.get('aside[aria-label="Deal properties"] form').trigger('submit');
+        await flushPromises();
+        await nextTick();
+
+        expect(updateSpy).toHaveBeenNthCalledWith(
+            2,
+            initialDeal.id,
+            expect.objectContaining({ expected_version: 5 }),
+        );
+        expect(wrapper.get('[data-testid="deal-version-badge"]').text()).toBe('v6');
+    });
+
+    it('renders restricted notice and omits masked associations on DealDetailPage and ContactDetailPage saves', async () => {
+        const board = makeBoard();
+        const card = board.columns[0].deals[0];
+        const maskedDeal = makeDealDetailFromCard(card, {
+            company_id: null,
+            company_name: null,
+            company_domain: null,
+            primary_contact_id: null,
+            primary_contact_name: null,
+            primary_contact_email: null,
+            has_masked_company: true,
+            has_masked_primary_contact: true,
+            version: 4,
+        });
+
+        const updateDealSpy = vi.spyOn(crmApi, 'updateDeal').mockResolvedValue(maskedDeal);
+
+        const dealWrapper = mount(DealDetailPage, {
+            attachTo: document.body,
+            props: {
+                deal: maskedDeal,
+                company: null,
+                primaryContact: null,
+                pipeline: board.pipeline,
+                stakeholders: [],
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                companies: [{ id: 'comp-visible', name: 'Cascadia Cold Storage', domain: 'cascadia.internal' }],
+                contacts: [
+                    {
+                        id: 'cont-visible',
+                        full_name: 'Elena Rostova',
+                        primary_email: 'elena@cascadia.internal',
+                        company_id: 'comp-visible',
+                    },
+                ],
+                stakeholderRoles: ['decision_maker'],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['account_manager'],
+                can: {
+                    update: true,
+                    delete: false,
+                    moveStage: true,
+                    overrideGates: false,
+                    manageCollaborators: false,
+                },
+            },
+        });
+        mountedWrappers.push(dealWrapper);
+        await nextTick();
+
+        expect(dealWrapper.get('[data-testid="deal-masked-company"]').text()).toBe(
+            'Restricted (outside your silo)',
+        );
+        expect(dealWrapper.get('[data-testid="deal-masked-primary-contact"]').text()).toBe(
+            'Restricted (outside your silo)',
+        );
+        expect(dealWrapper.find('aside[aria-label="Deal properties"] select option[value=""]').exists()).toBe(true); // account manager Unassigned only
+        expect(dealWrapper.text()).not.toContain('None');
+
+        await dealWrapper.get('aside[aria-label="Deal properties"] form').trigger('submit');
+        await flushPromises();
+
+        expect(updateDealSpy).toHaveBeenCalledTimes(1);
+        const dealPayload = updateDealSpy.mock.calls[0][1] as Record<string, unknown>;
+        expect(Object.prototype.hasOwnProperty.call(dealPayload, 'company_id')).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(dealPayload, 'primary_contact_id')).toBe(false);
+
+        // ContactDetailPage masked company + prop sync
+        const maskedContact: App.Modules.Crm.Contacts.Data.ContactDetailData = {
+            id: 'cont-masked-1',
+            company_id: null,
+            company_name: null,
+            company_domain: null,
+            owner_id: 'usr-200',
+            owner_name: 'Devon Alvarez',
+            first_name: 'Hannah',
+            last_name: 'Kowalski',
+            full_name: 'Hannah Kowalski',
+            primary_email: 'h.kowalski@northwind.internal',
+            secondary_emails: [],
+            phones: [],
+            job_title: 'Operations Director',
+            is_primary_contact: false,
+            custom_fields: {},
+            created_at: '2026-11-01T10:00:00Z',
+            updated_at: '2026-11-26T00:00:00Z',
+            has_masked_company: true,
+        };
+
+        const updateContactSpy = vi.spyOn(crmApi, 'updateContact').mockResolvedValue(maskedContact);
+
+        const contactWrapper = mount(ContactDetailPage, {
+            attachTo: document.body,
+            props: {
+                contact: maskedContact,
+                company: null,
+                deals: [],
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                companies: [{ id: 'comp-visible', name: 'Cascadia Cold Storage', domain: 'cascadia.internal' }],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['account_manager'],
+                can: {
+                    update: true,
+                    delete: false,
+                    manageCollaborators: false,
+                },
+            },
+        });
+        mountedWrappers.push(contactWrapper);
+        await nextTick();
+
+        expect(contactWrapper.get('[data-testid="contact-masked-company"]').text()).toBe(
+            'Restricted (outside your silo)',
+        );
+        expect(contactWrapper.get('[data-testid="contact-linked-company-masked"]').text()).toBe(
+            'Restricted (outside your silo)',
+        );
+
+        await contactWrapper.get('aside[aria-label="Contact properties"] form').trigger('submit');
+        await flushPromises();
+
+        expect(updateContactSpy).toHaveBeenCalledTimes(1);
+        const contactPayload = updateContactSpy.mock.calls[0][1] as Record<string, unknown>;
+        expect(Object.prototype.hasOwnProperty.call(contactPayload, 'company_id')).toBe(false);
+
+        // Inertia prop reload syncs ContactDetailPage and CompanyDetailPage
+        await contactWrapper.setProps({
+            contact: { ...maskedContact, first_name: 'Hannah-Reloaded', full_name: 'Hannah-Reloaded Kowalski' },
+        });
+        await nextTick();
+        expect(contactWrapper.text()).toContain('Hannah-Reloaded Kowalski');
+
+        const companyWrapper = mount(CompanyDetailPage, {
+            attachTo: document.body,
+            props: {
+                company: {
+                    id: 'comp-1',
+                    name: 'Northwind Logistics',
+                    domain: 'northwind.internal',
+                    lifecycle_stage: 'active_client',
+                    industry: 'Logistics',
+                    employee_range: '500-1000',
+                    annual_revenue_cents: 500000000,
+                    billing_address: {},
+                    owner_id: 'usr-200',
+                    owner_name: 'Devon Alvarez',
+                    account_manager_id: null,
+                    account_manager_name: null,
+                    custom_fields: {},
+                    created_at: '2026-11-01T10:00:00Z',
+                    updated_at: '2026-11-26T00:00:00Z',
+                },
+                contacts: [],
+                deals: [],
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                lifecycleStages: ['lead', 'prospect', 'active_client'],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['account_manager'],
+                can: {
+                    update: true,
+                    delete: false,
+                    manageCollaborators: false,
+                },
+            },
+        });
+        mountedWrappers.push(companyWrapper);
+        await companyWrapper.setProps({
+            company: {
+                ...companyWrapper.props('company'),
+                name: 'Northwind Global Logistics',
+            },
+        });
+        await nextTick();
+        expect(companyWrapper.text()).toContain('Northwind Global Logistics');
+    });
+
+    it('calls channel.stopListening without calling echo.leave() when DealKanbanBoard unmounts', async () => {
+        vi.useFakeTimers();
+        const mockEcho = createMockEcho();
+        setEchoInstanceForTesting(mockEcho.client);
+
+        const authStore = useAuthStore();
+        authStore.setUser(makeUser());
+
+        const wrapper = mount(DealKanbanBoard, {
+            attachTo: document.body,
+            props: {
+                board: makeBoard(),
+                customFieldDefinitions: [],
+                assignableUsers: [],
+                contacts: [],
+                canMoveDeals: true,
+                canOverrideGates: false,
+            },
+        });
+        await nextTick();
+
+        const listenCalls = (mockEcho.channelStub.listen as ReturnType<typeof vi.fn>).mock.calls;
+        expect(listenCalls).toHaveLength(1);
+        const [eventName, registeredCallback] = listenCalls[0];
+        expect(eventName).toBe('.App\\Modules\\Crm\\Deals\\Events\\SiloBoardInvalidated');
+
+        wrapper.unmount();
+
+        expect(mockEcho.stopListeningSpy).toHaveBeenCalledTimes(1);
+        expect(mockEcho.stopListeningSpy).toHaveBeenCalledWith(
+            '.App\\Modules\\Crm\\Deals\\Events\\SiloBoardInvalidated',
+            registeredCallback,
+        );
+        expect(mockEcho.leaveSpy).not.toHaveBeenCalled();
+
+        mockEcho.emitEvent('.App\\Modules\\Crm\\Deals\\Events\\SiloBoardInvalidated', {
+            pipeline_id: 'pipe-1',
+        });
+        vi.advanceTimersByTime(300);
+        expect(mockRouterReload).not.toHaveBeenCalled();
+    });
+
+    it('disables custom field key input and displays immutability hint when editing in PipelineSettingsPage', async () => {
+        const board = makeBoard();
+        const existingField: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData = {
+            id: 'cf-1',
+            entity_type: 'deal',
+            pipeline_id: board.pipeline.id,
+            key: 'deployment_region',
+            label: 'Deployment Region',
+            field_type: 'text',
+            options: null,
+            validation_rules: { required: false },
+            is_filterable: true,
+            is_active: true,
+            sort_order: 0,
+        };
+
+        const wrapper = mount(PipelineSettingsPage, {
+            attachTo: document.body,
+            props: {
+                pipelines: [board.pipeline],
+                customFieldDefinitions: [existingField],
+                allowedCoreFields: ['amount_cents', 'expected_close_date'],
+                canManage: true,
+            },
+        });
+        mountedWrappers.push(wrapper);
+        await nextTick();
+
+        const customFieldsTab = wrapper
+            .findAll('button[role="tab"]')
+            .find((btn) => btn.text().includes('Custom Fields'));
+        expect(customFieldsTab).toBeDefined();
+        await customFieldsTab?.trigger('click');
+        await nextTick();
+
+        await wrapper.get('button[aria-label="Edit custom field Deployment Region"]').trigger('click');
+        await flushPromises();
+        await nextTick();
+
+        const keyInput = document.body.querySelector<HTMLInputElement>(
+            'input[placeholder="deployment_region"]',
+        );
+        expect(keyInput).not.toBeNull();
+        expect(keyInput?.value).toBe('deployment_region');
+        expect(keyInput?.disabled).toBe(true);
+
+        const hint = document.body.querySelector('[data-testid="custom-field-key-hint"]');
+        expect(hint?.textContent).toContain('cannot be renamed');
+    });
+
+    it('enforces quick-fix safety guards across DealsIndexPage, ActivityTimeline, RichJsonRenderer, and crmApi CSRF', async () => {
+        // 1. DealsIndexPage defaults canMoveDeals to false when activeUser is null
+        mockPage.props = { auth: { user: null }, errors: {} };
+        const authStore = useAuthStore();
+        authStore.setUser(null);
+
+        const board = makeBoard();
+        const dealsPageWrapper = mount(DealsIndexPage, {
+            attachTo: document.body,
+            props: {
+                view: 'kanban',
+                board,
+                tableDeals: null,
+                filters: {
+                    view: 'kanban',
+                    pipeline_id: board.pipeline.id,
+                    stage_id: null,
+                    owner_id: null,
+                    company_id: null,
+                    search: null,
+                    custom_fields: null,
+                    sort_by: null,
+                    sort_dir: null,
+                    page: 1,
+                    per_page: 25,
+                },
+                pipelines: [board.pipeline],
+                filterDefinitions: [],
+                customFieldDefinitions: [],
+                assignableUsers: [],
+                companies: [],
+                contacts: [],
+                can: { create: false },
+            },
+        });
+        mountedWrappers.push(dealsPageWrapper);
+        await nextTick();
+
+        expect(dealsPageWrapper.get('[data-testid="kanban-card-deal-1"]').attributes('draggable')).toBe('false');
+        expect(dealsPageWrapper.find('[data-testid="kanban-stage-select-deal-1"]').exists()).toBe(false);
+
+        // 2. ActivityTimeline hides Pin/Unpin & Delete buttons when canCreateNote is false
+        const timelineWrapper = mount(ActivityTimeline, {
+            attachTo: document.body,
+            props: {
+                linkableType: 'deal',
+                linkableId: 'deal-1',
+                canCreateNote: false,
+                initialPage: {
+                    items: [
+                        {
+                            id: 'act-pinned',
+                            actor_id: 'usr-200',
+                            actor_name: 'Devon Alvarez',
+                            activity_type: 'note_created',
+                            source_type: 'note',
+                            source_id: 'note-1',
+                            visibility_mode: 'shared',
+                            summary: 'Pinned note',
+                            metadata: { is_pinned: true },
+                            occurred_at: '2026-11-25T14:00:00Z',
+                            note: {
+                                id: 'note-1',
+                                author_id: 'usr-200',
+                                author_name: 'Devon Alvarez',
+                                body_json: {
+                                    type: 'doc',
+                                    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Read only note' }] }],
+                                },
+                                body_text: 'Read only note',
+                                is_pinned: true,
+                                created_at: '2026-11-25T14:00:00Z',
+                                updated_at: '2026-11-25T14:00:00Z',
+                            },
+                        },
+                    ],
+                    next_cursor: null,
+                    has_more: false,
+                },
+            },
+        });
+        mountedWrappers.push(timelineWrapper);
+        await nextTick();
+
+        expect(timelineWrapper.find('[data-testid="rich-note-editor"]').exists()).toBe(false);
+        expect(timelineWrapper.find('button[aria-label="Unpin note"]').exists()).toBe(false);
+        expect(timelineWrapper.find('button[aria-label="Pin note"]').exists()).toBe(false);
+        expect(timelineWrapper.find('button[aria-label="Delete pinned note"]').exists()).toBe(false);
+        expect(timelineWrapper.find('button[aria-label="Delete note"]').exists()).toBe(false);
+
+        // 3. RichJsonRenderer truncates & clamps heading levels safely
+        const richWrapper = mount(RichJsonRenderer, {
+            attachTo: document.body,
+            props: {
+                document: {
+                    type: 'doc',
+                    content: [
+                        { type: 'heading', attrs: { level: 2.8 }, content: [{ type: 'text', text: 'Truncated' }] },
+                        { type: 'heading', attrs: { level: 99 }, content: [{ type: 'text', text: 'Clamped High' }] },
+                        { type: 'heading', attrs: { level: -2 }, content: [{ type: 'text', text: 'Clamped Low' }] },
+                    ],
+                },
+            },
+        });
+        mountedWrappers.push(richWrapper);
+        expect(richWrapper.get('h2').text()).toBe('Truncated');
+        expect(richWrapper.get('h6').text()).toBe('Clamped High');
+        expect(richWrapper.get('h1').text()).toBe('Clamped Low');
+
+        // 4. crmApi prefers decoded XSRF-TOKEN cookie over stale meta csrf-token
+        const metaEl = document.createElement('meta');
+        metaEl.name = 'csrf-token';
+        metaEl.content = 'stale-meta-token';
+        document.head.appendChild(metaEl);
+        document.cookie = 'XSRF-TOKEN=fresh%2Bcookie%3Dtoken; path=/';
+
+        const originalAdapter = crmHttpClient.defaults.adapter;
+        const capturedHeaders: Array<Record<string, unknown>> = [];
+        crmHttpClient.defaults.adapter = async (config) => {
+            capturedHeaders.push({ ...(config.headers ?? {}) });
+            return {
+                data: { deleted: true },
+                status: 200,
+                statusText: 'OK',
+                headers: new AxiosHeaders(),
+                config,
+            };
+        };
+
+        try {
+            await crmApi.deleteNote('note-1');
+            expect(capturedHeaders[0]['X-XSRF-TOKEN']).toBe('fresh+cookie=token');
+            expect(capturedHeaders[0]['X-CSRF-TOKEN']).toBeUndefined();
+
+            document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+            await crmApi.deleteNote('note-1');
+            expect(capturedHeaders[1]['X-CSRF-TOKEN']).toBe('stale-meta-token');
+        } finally {
+            crmHttpClient.defaults.adapter = originalAdapter;
+            metaEl.remove();
+            document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        }
     });
 });

@@ -65,7 +65,7 @@ const page = usePage<{ auth?: { user?: App.Modules.Core.Auth.Data.AuthenticatedU
 
 const activeUser = computed(() => authStore.user ?? page.props?.auth?.user ?? null);
 const canMoveDeals = computed(() =>
-    activeUser.value ? activeUser.value.permissions.includes('deals.move_stage') : true,
+    activeUser.value ? activeUser.value.permissions.includes('deals.move_stage') : false,
 );
 const canOverrideGates = computed(() =>
     activeUser.value ? activeUser.value.permissions.includes('deals.override_gates') : false,
