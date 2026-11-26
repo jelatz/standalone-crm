@@ -23,6 +23,15 @@ use App\Modules\Crm\Pipelines\Models\Pipeline;
 use App\Modules\Crm\Pipelines\Models\PipelineStage;
 use App\Modules\Crm\Pipelines\Policies\PipelinePolicy;
 use App\Modules\Crm\Timeline\Models\Activity;
+use App\Modules\Projects\Handoffs\Models\DealHandoff;
+use App\Modules\Projects\Handoffs\Policies\DealHandoffPolicy;
+use App\Modules\Projects\Projects\Models\Project;
+use App\Modules\Projects\Projects\Models\ProjectStage;
+use App\Modules\Projects\Projects\Policies\ProjectPolicy;
+use App\Modules\Projects\Tasks\Models\Task;
+use App\Modules\Projects\Tasks\Policies\TaskPolicy;
+use App\Modules\Projects\Templates\Models\ProjectTemplate;
+use App\Modules\Projects\Templates\Policies\ProjectTemplatePolicy;
 use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -86,6 +95,21 @@ class ModularDomainServiceProvider extends ServiceProvider
         if (class_exists(Activity::class)) {
             $morphMap['activity'] = Activity::class;
         }
+        if (class_exists(ProjectTemplate::class)) {
+            $morphMap['project_template'] = ProjectTemplate::class;
+        }
+        if (class_exists(DealHandoff::class)) {
+            $morphMap['deal_handoff'] = DealHandoff::class;
+        }
+        if (class_exists(Project::class)) {
+            $morphMap['project'] = Project::class;
+        }
+        if (class_exists(ProjectStage::class)) {
+            $morphMap['project_stage'] = ProjectStage::class;
+        }
+        if (class_exists(Task::class)) {
+            $morphMap['task'] = Task::class;
+        }
 
         if ($morphMap !== []) {
             Relation::enforceMorphMap($morphMap);
@@ -103,6 +127,10 @@ class ModularDomainServiceProvider extends ServiceProvider
             Pipeline::class => PipelinePolicy::class,
             CustomFieldDefinition::class => CustomFieldDefinitionPolicy::class,
             Note::class => NotePolicy::class,
+            ProjectTemplate::class => ProjectTemplatePolicy::class,
+            DealHandoff::class => DealHandoffPolicy::class,
+            Project::class => ProjectPolicy::class,
+            Task::class => TaskPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

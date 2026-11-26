@@ -519,5 +519,30 @@ export type ActivityTypeEnum = 'note_created' | 'deal_created' | 'stage_changed'
 }
 }
 }
+namespace Projects {
+namespace Handoffs {
+namespace Enums {
+export type DealHandoffStatusEnum = 'pending_review' | 'changes_requested' | 'approved' | 'provisioned' | 'rejected';
+}
+}
+namespace Projects {
+namespace Enums {
+export type ProjectHealthEnum = 'on_track' | 'at_risk' | 'off_track';
+export type ProjectStageCategoryEnum = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
+export type ProjectStatusEnum = 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+}
+}
+namespace Tasks {
+namespace Enums {
+export type TaskPriorityEnum = 'low' | 'medium' | 'high' | 'urgent';
+export type TaskStatusEnum = 'todo' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled';
+}
+}
+namespace Templates {
+namespace Enums {
+export type TemplateAssigneeRoleHintEnum = 'pm' | 'am' | 'support' | 'it';
+}
+}
+}
 }
 }
