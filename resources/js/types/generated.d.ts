@@ -521,6 +521,97 @@ export type ActivityTypeEnum = 'note_created' | 'deal_created' | 'stage_changed'
 }
 namespace Projects {
 namespace Handoffs {
+namespace Data {
+export type ApproveHandoffData = {
+project_template_id: string,
+assigned_pm_id: string,
+assigned_am_id: undefined | string | null,
+project_name: undefined | string | null,
+target_kickoff_date: undefined | string | null,
+review_feedback: undefined | string | null,
+};
+export type DealHandoffDetailData = {
+id: string,
+deal_id: string,
+company_id: string,
+deal: App.Modules.Projects.Handoffs.Data.HandoffDealSummaryData | null,
+company: App.Modules.Projects.Handoffs.Data.HandoffCompanySummaryData | null,
+status: App.Modules.Projects.Handoffs.Enums.DealHandoffStatusEnum,
+scope_notes_json: Record<string, any>,
+handoff_checklist: {
+label: string,
+checked: boolean,
+}[],
+target_kickoff_date: string | null,
+review_feedback: string | null,
+submitted_by: App.Modules.Core.Users.Data.UserSummaryData | null,
+reviewed_by: App.Modules.Core.Users.Data.UserSummaryData | null,
+assigned_pm: App.Modules.Core.Users.Data.UserSummaryData | null,
+assigned_am: App.Modules.Core.Users.Data.UserSummaryData | null,
+template: App.Modules.Projects.Templates.Data.ProjectTemplateSummaryData | null,
+provisioned_project: App.Modules.Projects.Handoffs.Data.HandoffProjectSummaryData | null,
+submitted_at: string,
+reviewed_at: string | null,
+provisioned_at: string | null,
+created_at: string,
+updated_at: string,
+};
+export type DealHandoffSummaryData = {
+id: string,
+deal_id: string,
+company_id: string,
+deal_title: string | null,
+deal_amount_cents: number | null,
+deal_currency: string | null,
+company_name: string | null,
+status: App.Modules.Projects.Handoffs.Enums.DealHandoffStatusEnum,
+target_kickoff_date: string | null,
+review_feedback: string | null,
+submitted_by: App.Modules.Core.Users.Data.UserSummaryData | null,
+reviewed_by: App.Modules.Core.Users.Data.UserSummaryData | null,
+assigned_pm: App.Modules.Core.Users.Data.UserSummaryData | null,
+assigned_am: App.Modules.Core.Users.Data.UserSummaryData | null,
+template: App.Modules.Projects.Templates.Data.ProjectTemplateSummaryData | null,
+provisioned_project: App.Modules.Projects.Handoffs.Data.HandoffProjectSummaryData | null,
+submitted_at: string,
+reviewed_at: string | null,
+provisioned_at: string | null,
+};
+export type HandoffCompanySummaryData = {
+id: string,
+name: string,
+domain: string | null,
+lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
+};
+export type HandoffDealSummaryData = {
+id: string,
+title: string,
+amount_cents: number,
+currency: string,
+stage_id: string,
+stage_name: string | null,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | null,
+};
+export type HandoffProjectSummaryData = {
+id: string,
+code: string,
+name: string,
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
+};
+export type ReviewHandoffData = {
+review_feedback: string,
+};
+export type SubmitHandoffData = {
+scope_notes_json: Record<string, any>,
+handoff_checklist: {
+label: string,
+checked: boolean,
+}[],
+target_kickoff_date: string | null,
+assigned_am_id: string | null,
+};
+}
 namespace Enums {
 export type DealHandoffStatusEnum = 'pending_review' | 'changes_requested' | 'approved' | 'provisioned' | 'rejected';
 }
@@ -539,6 +630,20 @@ export type TaskStatusEnum = 'todo' | 'in_progress' | 'blocked' | 'review' | 'do
 }
 }
 namespace Templates {
+namespace Data {
+export type ProjectTemplateSummaryData = {
+id: string,
+name: string,
+department_id: string | null,
+department_name: string | null,
+description: string | null,
+is_active: boolean,
+default_stages: Record<string, any>[],
+tasks_count: number,
+created_at: string,
+updated_at: string,
+};
+}
 namespace Enums {
 export type TemplateAssigneeRoleHintEnum = 'pm' | 'am' | 'support' | 'it';
 }

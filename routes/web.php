@@ -8,13 +8,6 @@ Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function ()
     Route::inertia('/', 'core/pages/WorkspaceHomePage')
         ->name('app.home');
 
-    Route::inertia('/projects/handoffs', 'core/pages/ModulePlaceholderPage', [
-        'moduleKey' => 'projects.handoffs',
-        'moduleTitle' => 'Handoff Intake',
-        'moduleDescription' => 'Approval-gated Deal Won review queue for Operations & PM assignment (Phase 2).',
-        'phaseLabel' => 'Phase 2',
-    ])->name('projects.handoffs');
-
     Route::inertia('/projects', 'core/pages/ModulePlaceholderPage', [
         'moduleKey' => 'projects.index',
         'moduleTitle' => 'Projects & Tasks',
