@@ -13,6 +13,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 class ListContactsAction
 {
@@ -43,7 +44,7 @@ class ListContactsAction
             ->all();
 
         /** @var array<string, int|string> $visibleCompanyIds */
-        $visibleCompanyIds = $companyIds !== []
+        $visibleCompanyIds = ($companyIds !== [] && Gate::forUser($viewer)->allows('viewAny', Company::class))
             ? Company::query()
                 ->visibleTo($viewer)
                 ->whereIn('id', $companyIds)

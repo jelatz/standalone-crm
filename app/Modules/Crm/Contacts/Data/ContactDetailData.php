@@ -51,7 +51,7 @@ class ContactDetailData extends Data
 
         return new self(
             id: (string) $contact->id,
-            company_id: $contact->company_id !== null ? (string) $contact->company_id : null,
+            company_id: $canViewCompany && $contact->company_id !== null ? (string) $contact->company_id : null,
             company_name: $company?->name,
             company_domain: $company?->domain,
             owner_id: (string) $contact->owner_id,

@@ -50,7 +50,7 @@ class ContactListItemData extends Data
 
         return new self(
             id: (string) $contact->id,
-            company_id: $contact->company_id !== null ? (string) $contact->company_id : null,
+            company_id: $canViewCompany && $contact->company_id !== null ? (string) $contact->company_id : null,
             company_name: $company?->name,
             owner_id: (string) $contact->owner_id,
             owner_name: $owner?->name,

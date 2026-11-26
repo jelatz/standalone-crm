@@ -12,11 +12,13 @@ use App\Modules\Core\Rbac\Models\EntityCollaborator;
 use App\Modules\Core\Users\Data\UserSummaryData;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\User;
+use App\Modules\Crm\Companies\Models\Company;
 use App\Modules\Crm\CustomFields\Data\CustomFieldDefinitionData;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldEntityTypeEnum;
 use App\Modules\Crm\CustomFields\Models\CustomFieldDefinition;
 use App\Support\Silo\VisibleScopeResolver;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Gate;
 
 class LoadEntityContextAction
 {
@@ -126,5 +128,29 @@ class LoadEntityContextAction
                 CollaboratorRoleLabel::cases(),
             ),
         ];
+    }
+
+    /**
+     * Load minimal silo-scoped companies list gated by CompanyPolicy::viewAny.
+     *
+     * @return list<array{id: string, name: string, domain: ?string}>
+     */
+    public function visibleCompanySummaries(User $viewer): array
+    {
+        if (! Gate::forUser($viewer)->allows('viewAny', Company::class)) {
+            return [];
+        }
+
+        return Company::query()
+            ->visibleTo($viewer)
+            ->orderBy('name')
+            ->get(['id', 'name', 'domain'])
+            ->map(static fn (Company $company): array => [
+                'id' => (string) $company->id,
+                'name' => $company->name,
+                'domain' => $company->domain,
+            ])
+            ->values()
+            ->all();
     }
 }

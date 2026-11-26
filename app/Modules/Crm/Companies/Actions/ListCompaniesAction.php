@@ -6,11 +6,14 @@ use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Companies\Data\CompanyFilterData;
 use App\Modules\Crm\Companies\Data\CompanyListItemData;
 use App\Modules\Crm\Companies\Models\Company;
+use App\Modules\Crm\Contacts\Models\Contact;
 use App\Modules\Crm\CustomFields\Actions\ApplyCustomFieldFiltersAction;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldEntityTypeEnum;
+use App\Modules\Crm\Deals\Models\Deal;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 class ListCompaniesAction
 {
@@ -26,12 +29,20 @@ class ListCompaniesAction
         $perPage = max(1, min((int) ($filter->per_page ?? 25), 100));
         $page = max(1, (int) ($filter->page ?? 1));
 
+        $counts = [];
+        if (Gate::forUser($viewer)->allows('viewAny', Contact::class)) {
+            $counts['contacts'] = static fn (Builder $sub) => $sub->visibleTo($viewer);
+        }
+        if (Gate::forUser($viewer)->allows('viewAny', Deal::class)) {
+            $counts['deals'] = static fn (Builder $sub) => $sub->visibleTo($viewer);
+        }
+
         $query = $this->buildQuery($viewer, $filter)
-            ->with(['owner:id,name', 'accountManager:id,name'])
-            ->withCount([
-                'contacts' => static fn (Builder $sub) => $sub->visibleTo($viewer),
-                'deals' => static fn (Builder $sub) => $sub->visibleTo($viewer),
-            ]);
+            ->with(['owner:id,name', 'accountManager:id,name']);
+
+        if ($counts !== []) {
+            $query->withCount($counts);
+        }
 
         /** @var LengthAwarePaginator<int, Company> $paginator */
         $paginator = $query->paginate(perPage: $perPage, page: $page);

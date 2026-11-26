@@ -3,6 +3,7 @@
 use App\Modules\Core\Attachments\Enums\AttachmentScanStatus;
 use App\Modules\Core\Attachments\Models\Attachment;
 use App\Modules\Core\Attachments\Models\AttachmentLink;
+use App\Modules\Core\Rbac\Actions\GrantEntityCollaboratorAction;
 use App\Modules\Core\Rbac\Enums\CollaboratorAccessLevel;
 use App\Modules\Core\Rbac\Enums\CollaboratorRoleLabel;
 use App\Modules\Core\Rbac\Enums\RoleEnum;
@@ -455,6 +456,23 @@ it('filters Companies and Contacts via PostgreSQL jsonb @> containment using GIN
         ->assertUnprocessable()
         ->assertJsonValidationErrors(['custom_fields.linkedin_url']);
 
+    // Invalid sort_by / sort_dir rejected with 422 on both Companies and Contacts
+    $this->actingAs($repA)->getJson('/app/crm/companies?sort_by=invalid_col')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['sort_by']);
+
+    $this->actingAs($repA)->getJson('/app/crm/companies?sort_dir=sideways')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['sort_dir']);
+
+    $this->actingAs($repA)->getJson('/app/crm/contacts?sort_by=invalid_col')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['sort_by']);
+
+    $this->actingAs($repA)->getJson('/app/crm/contacts?sort_dir=upward')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['sort_dir']);
+
     // Seed sufficient rows + ANALYZE so PostgreSQL planner selects GIN index idx_companies_cf natively
     $bulkRows = [];
     for ($i = 0; $i < 1500; $i++) {
@@ -595,6 +613,21 @@ it('enforces Contacts CRUD, silo-verified company linking, atomic citext contact
     expect(ContactEmail::query()->where('contact_id', $contactAId)->where('is_primary', false)->pluck('email')->all())
         ->toBe(['exec@companya.io']);
 
+    // Re-submitting identical secondary_emails (different case / duplicate of primary) must NOT emit spurious FieldUpdated
+    $activityCountBefore = Activity::query()
+        ->where('source_type', 'contact')
+        ->where('source_id', $contactAId)
+        ->count();
+
+    $this->actingAs($repA)->patchJson("/api/internal/crm/contacts/{$contactAId}", [
+        'secondary_emails' => ['EXEC@COMPANYA.IO', 'Ada.Alt@CompanyA.IO'],
+    ])->assertOk();
+
+    expect(Activity::query()
+        ->where('source_type', 'contact')
+        ->where('source_id', $contactAId)
+        ->count())->toBe($activityCountBefore);
+
     // Case-insensitive search across full_name, primary_email, and contact_emails.email + custom_fields filter
     $this->actingAs($repA)->get('/app/crm/contacts?search=ada+lovelace')
         ->assertOk()
@@ -648,15 +681,26 @@ it('enforces Contacts CRUD, silo-verified company linking, atomic citext contact
         'role_label' => CollaboratorRoleLabel::Observer->value,
     ])->assertCreated();
 
-    // Rep B views ContactDetailPage: company link is hidden (Company A is out-of-silo!), and ONLY Deal B is visible!
+    // Rep B views ContactDetailPage & ContactsIndexPage: company_id, company_name, and company link are hidden (Company A is out-of-silo!), and ONLY Deal B is visible!
     $this->actingAs($repB)->get("/app/crm/contacts/{$contactAId}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('crm/pages/ContactDetailPage')
             ->where('contact.id', $contactAId)
+            ->where('contact.company_id', null)
+            ->where('contact.company_name', null)
             ->where('company', null)
             ->has('deals', 1)
             ->where('deals.0.id', $dealB->id));
+
+    $this->actingAs($repB)->get('/app/crm/contacts?search=Ada+Lovelace')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/ContactsIndexPage')
+            ->has('contacts.data', 1)
+            ->where('contacts.data.0.id', $contactAId)
+            ->where('contacts.data.0.company_id', null)
+            ->where('contacts.data.0.company_name', null));
 
     // Rep A sees Company A + ONLY Deal A on ContactDetailPage
     $this->actingAs($repA)->get("/app/crm/contacts/{$contactAId}")
@@ -681,4 +725,68 @@ it('enforces Contacts CRUD, silo-verified company linking, atomic citext contact
     $this->actingAs($repA)->deleteJson("/api/internal/crm/contacts/{$contactAId}")->assertOk();
     expect(Contact::withTrashed()->find($contactAId)?->trashed())->toBeTrue();
     $this->actingAs($repA)->get("/app/crm/contacts/{$contactAId}")->assertNotFound();
+});
+
+it('gates related deals and deals_count by DealPolicy::viewAny for roles lacking deals.view even with Deal collaborator grants', function (): void {
+    $dept = Department::query()->create(['name' => 'IT & Security', 'slug' => 't13-it-gate']);
+    $repA = createTask13User($dept, 'EMP-IT-REPA', 'rep.a.it@acme.internal', RoleEnum::Sales);
+    $itUser = createTask13User($dept, 'EMP-IT-USR', 'it.user@acme.internal', RoleEnum::It);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
+
+    $company = Company::query()->create([
+        'name' => 'Gated Deals Corp',
+        'owner_id' => $repA->id,
+    ]);
+
+    $contact = Contact::query()->create([
+        'company_id' => $company->id,
+        'owner_id' => $repA->id,
+        'first_name' => 'Alan',
+        'last_name' => 'Turing',
+    ]);
+
+    $deal = Deal::query()->create([
+        'company_id' => $company->id,
+        'primary_contact_id' => $contact->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $repA->id,
+        'title' => 'Hidden Deal From IT',
+        'stage_entered_at' => now(),
+    ]);
+
+    $grantAction = app(GrantEntityCollaboratorAction::class);
+    foreach ([$company, $contact, $deal] as $target) {
+        $grantAction->execute(
+            collaboratable: $target,
+            user: $itUser,
+            accessLevel: CollaboratorAccessLevel::Manager,
+            roleLabel: CollaboratorRoleLabel::ItLead,
+            grantedBy: $repA,
+        );
+    }
+
+    // It holds companies.view + contacts.view (NOT deals.view): deals_count must be 0 and deals props must be empty
+    $this->actingAs($itUser)->get('/app/crm/companies')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('companies.data', 1)
+            ->where('companies.data.0.id', $company->id)
+            ->where('companies.data.0.contacts_count', 1)
+            ->where('companies.data.0.deals_count', 0));
+
+    $this->actingAs($itUser)->get("/app/crm/companies/{$company->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('company.id', $company->id)
+            ->has('contacts', 1)
+            ->has('deals', 0));
+
+    $this->actingAs($itUser)->get("/app/crm/contacts/{$contact->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('contact.id', $contact->id)
+            ->has('deals', 0));
 });
