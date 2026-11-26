@@ -42,6 +42,9 @@
 | **5. Deal-to-Project Handoff** | **Approval-gated intake** (`Deal Won` → `Pending Handoff` → Ops/PM approves & picks template) | `deal_handoffs` state machine (`pending_review` → `changes_requested` / `approved` → `provisioned` / `rejected`) bridging Sales and Delivery silos cleanly. |
 | **6. Chat & Context Threads** | **Internal employees only**: `#channels` + `DMs` + **embedded context-linked threads** | Unified `chat_conversations` (`public_channel`, `private_channel`, `direct`, `group_dm`, `entity_thread`) syncing embedded Deal/Project/Task/Email threads with global Chat unreads & `@mentions`. |
 
+> [!NOTE]
+> **Decision update (2026-11-26):** Password login + `superadmin` user management (`8e03027`, Laravel 13) replaced Google/Microsoft OIDC SSO for now. Dual-provider SSO (Google Workspace / Microsoft 365) will be re-added later alongside password login; therefore **Phase 4 email sync must use its own per-mailbox OAuth consent** rather than relying on SSO login tokens.
+
 ---
 
 ## 2. Domain & PostgreSQL 17 Schema Design
