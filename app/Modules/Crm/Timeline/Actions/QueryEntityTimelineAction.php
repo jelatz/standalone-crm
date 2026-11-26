@@ -36,6 +36,19 @@ class QueryEntityTimelineAction
         'project',
     ];
 
+    /**
+     * @var list<string>
+     */
+    public const array ALLOWED_SOURCE_TYPES = [
+        'deal',
+        'contact',
+        'company',
+        'note',
+        'project',
+        'task',
+        'deal_handoff',
+    ];
+
     public const int MAX_SCAN_BATCHES = 20;
 
     public function execute(
@@ -189,23 +202,27 @@ class QueryEntityTimelineAction
                 $sourceId = (string) $activity->source_id;
                 $noteData = null;
 
-                if ($activity->source_type === 'deal' && ! isset($visibleDealIds[$sourceId])) {
+                if (! in_array($activity->source_type, self::ALLOWED_SOURCE_TYPES, true)) {
                     continue;
                 }
 
-                if ($activity->source_type === 'contact' && ! isset($visibleContactIds[$sourceId])) {
-                    continue;
-                }
-
-                if ($activity->source_type === 'company' && ! isset($visibleCompanyIds[$sourceId])) {
-                    continue;
-                }
-
-                if ($activity->source_type === 'project' && ! isset($visibleProjectIds[$sourceId])) {
-                    continue;
-                }
-
-                if ($activity->source_type === 'task') {
+                if ($activity->source_type === 'deal') {
+                    if (! isset($visibleDealIds[$sourceId])) {
+                        continue;
+                    }
+                } elseif ($activity->source_type === 'contact') {
+                    if (! isset($visibleContactIds[$sourceId])) {
+                        continue;
+                    }
+                } elseif ($activity->source_type === 'company') {
+                    if (! isset($visibleCompanyIds[$sourceId])) {
+                        continue;
+                    }
+                } elseif ($activity->source_type === 'project') {
+                    if (! isset($visibleProjectIds[$sourceId])) {
+                        continue;
+                    }
+                } elseif ($activity->source_type === 'task') {
                     if (! $canViewTasks) {
                         continue;
                     }
@@ -215,9 +232,7 @@ class QueryEntityTimelineAction
                     if ($task === null || ! Gate::forUser($viewer)->allows('view', $task)) {
                         continue;
                     }
-                }
-
-                if ($activity->source_type === 'deal_handoff') {
+                } elseif ($activity->source_type === 'deal_handoff') {
                     if (! $canViewHandoffs) {
                         continue;
                     }
@@ -227,9 +242,7 @@ class QueryEntityTimelineAction
                     if ($handoff === null || ! Gate::forUser($viewer)->allows('view', $handoff)) {
                         continue;
                     }
-                }
-
-                if ($activity->source_type === 'note') {
+                } elseif ($activity->source_type === 'note') {
                     /** @var Note|null $note */
                     $note = $notesById->get($sourceId);
                     if ($note === null || ! Gate::forUser($viewer)->allows('view', $note)) {
@@ -237,6 +250,8 @@ class QueryEntityTimelineAction
                     }
 
                     $noteData = NoteData::fromModel($note);
+                } else {
+                    continue;
                 }
 
                 $visibleEntries[] = [

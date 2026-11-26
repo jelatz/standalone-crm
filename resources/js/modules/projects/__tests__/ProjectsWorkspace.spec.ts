@@ -1465,4 +1465,42 @@ describe('Task 2.4 — Projects, Deal Handoffs, My Work & CRM/Shell Wiring', () 
             indexWrapper.get('[data-testid="projects-index-offline-banner"]').attributes('role'),
         ).toBe('status');
     });
+
+    it('renders restricted fallbacks and hides cross-silo deal/company links on HandoffDetailPage when deal, company, and provisioned_project are null', async () => {
+        const maskedWrapper = mount(HandoffDetailPage, {
+            attachTo: document.body,
+            props: {
+                handoff: makeHandoffDetail({
+                    company_id: null,
+                    deal: null,
+                    company: null,
+                    provisioned_project: null,
+                }),
+                templates: [],
+                assignablePms: [],
+                assignableAms: [],
+                can: {
+                    resubmit: false,
+                    requestChanges: false,
+                    reject: false,
+                    approve: false,
+                    viewProject: false,
+                },
+            },
+        });
+        mountedWrappers.push(maskedWrapper);
+        await nextTick();
+
+        expect(maskedWrapper.text()).toContain('Deal restricted');
+        expect(maskedWrapper.get('[data-testid="handoff-restricted-company"]').text()).toBe(
+            'Restricted client',
+        );
+        expect(maskedWrapper.find('[data-testid="handoff-view-deal-link"]').exists()).toBe(false);
+        expect(maskedWrapper.find('[data-testid="handoff-company-link"]').exists()).toBe(false);
+        expect(maskedWrapper.find('a[href="/app/crm/deals/deal-won-1"]').exists()).toBe(false);
+        expect(maskedWrapper.find('a[href="/app/crm/companies/comp-1"]').exists()).toBe(false);
+        expect(maskedWrapper.find('[data-testid="handoff-provisioned-project-card"]').exists()).toBe(
+            false,
+        );
+    });
 });

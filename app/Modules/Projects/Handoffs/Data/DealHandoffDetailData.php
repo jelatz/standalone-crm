@@ -19,7 +19,7 @@ class DealHandoffDetailData extends Data
     public function __construct(
         public string $id,
         public string $deal_id,
-        public string $company_id,
+        public ?string $company_id,
         public ?HandoffDealSummaryData $deal,
         public ?HandoffCompanySummaryData $company,
         public DealHandoffStatusEnum $status,
@@ -40,12 +40,16 @@ class DealHandoffDetailData extends Data
         public string $updated_at,
     ) {}
 
-    public static function fromModel(DealHandoff $handoff): self
-    {
-        $deal = $handoff->relationLoaded('deal') && $handoff->deal !== null
+    public static function fromModel(
+        DealHandoff $handoff,
+        bool $canViewCompany = true,
+        bool $canViewDeal = true,
+        bool $canViewProject = true,
+    ): self {
+        $deal = $canViewDeal && $handoff->relationLoaded('deal') && $handoff->deal !== null
             ? HandoffDealSummaryData::fromModel($handoff->deal)
             : null;
-        $company = $handoff->relationLoaded('company') && $handoff->company !== null
+        $company = $canViewCompany && $handoff->relationLoaded('company') && $handoff->company !== null
             ? HandoffCompanySummaryData::fromModel($handoff->company)
             : null;
         $submittedBy = $handoff->relationLoaded('submittedBy') && $handoff->submittedBy !== null
@@ -63,7 +67,7 @@ class DealHandoffDetailData extends Data
         $template = $handoff->relationLoaded('template') && $handoff->template !== null
             ? ProjectTemplateSummaryData::fromModel($handoff->template)
             : null;
-        $project = $handoff->relationLoaded('project') && $handoff->project !== null
+        $project = $canViewProject && $handoff->relationLoaded('project') && $handoff->project !== null
             ? HandoffProjectSummaryData::fromModel($handoff->project)
             : null;
 
@@ -79,7 +83,7 @@ class DealHandoffDetailData extends Data
         return new self(
             id: (string) $handoff->id,
             deal_id: (string) $handoff->deal_id,
-            company_id: (string) $handoff->company_id,
+            company_id: $canViewCompany ? (string) $handoff->company_id : null,
             deal: $deal,
             company: $company,
             status: $handoff->status,

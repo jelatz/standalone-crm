@@ -137,14 +137,20 @@ class ListHandoffQueueAction
         }
 
         $viewerId = (string) $viewer->id;
+        $canViewDeals = $viewer->checkPermissionTo(PermissionEnum::DealsView->value);
 
-        return $query->where(static function (Builder $sub) use ($viewer, $viewerId): void {
+        return $query->where(static function (Builder $sub) use ($viewer, $viewerId, $canViewDeals): void {
             $sub->where('submitted_by_id', $viewerId)
                 ->orWhere('assigned_pm_id', $viewerId)
                 ->orWhere('assigned_am_id', $viewerId)
-                ->orWhereHas('deal', static function (Builder $dealQuery) use ($viewer): void {
-                    $dealQuery->visibleTo($viewer);
-                });
+                ->when(
+                    $canViewDeals,
+                    static function (Builder $dealSubQuery) use ($viewer): void {
+                        $dealSubQuery->orWhereHas('deal', static function (Builder $dealQuery) use ($viewer): void {
+                            $dealQuery->visibleTo($viewer);
+                        });
+                    },
+                );
         });
     }
 }

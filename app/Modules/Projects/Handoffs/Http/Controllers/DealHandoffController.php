@@ -64,7 +64,7 @@ class DealHandoffController extends Controller
         $data = SubmitHandoffData::validateAndCreate($request->all());
         $handoff = $submitHandoff->execute($actor, $deal, $data);
 
-        return response()->json($loadDetail->buildDetailData($handoff)->toArray(), 201);
+        return response()->json($loadDetail->buildDetailData($handoff, $actor)->toArray(), 201);
     }
 
     public function resubmit(
@@ -81,7 +81,7 @@ class DealHandoffController extends Controller
         $data = SubmitHandoffData::validateAndCreate($request->all());
         $updated = $resubmitHandoff->execute($actor, $handoff, $data);
 
-        return response()->json($loadDetail->buildDetailData($updated)->toArray(), 200);
+        return response()->json($loadDetail->buildDetailData($updated, $actor)->toArray(), 200);
     }
 
     public function requestChanges(
@@ -98,7 +98,7 @@ class DealHandoffController extends Controller
         $data = ReviewHandoffData::validateAndCreate($request->all());
         $updated = $requestChanges->execute($actor, $handoff, $data);
 
-        return response()->json($loadDetail->buildDetailData($updated)->toArray(), 200);
+        return response()->json($loadDetail->buildDetailData($updated, $actor)->toArray(), 200);
     }
 
     public function reject(
@@ -115,7 +115,7 @@ class DealHandoffController extends Controller
         $data = ReviewHandoffData::validateAndCreate($request->all());
         $updated = $rejectHandoff->execute($actor, $handoff, $data);
 
-        return response()->json($loadDetail->buildDetailData($updated)->toArray(), 200);
+        return response()->json($loadDetail->buildDetailData($updated, $actor)->toArray(), 200);
     }
 
     public function approve(
@@ -132,6 +132,6 @@ class DealHandoffController extends Controller
         $data = ApproveHandoffData::validateAndCreate($request->all());
         $updated = $approveHandoff->execute($actor, $handoff, $data);
 
-        return response()->json($loadDetail->buildDetailData($updated)->toArray(), 200);
+        return response()->json($loadDetail->buildDetailData($updated, $actor)->toArray(), 200);
     }
 }

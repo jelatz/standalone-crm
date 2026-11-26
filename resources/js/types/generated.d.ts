@@ -533,7 +533,7 @@ review_feedback: undefined | string | null,
 export type DealHandoffDetailData = {
 id: string,
 deal_id: string,
-company_id: string,
+company_id: string | null,
 deal: App.Modules.Projects.Handoffs.Data.HandoffDealSummaryData | null,
 company: App.Modules.Projects.Handoffs.Data.HandoffCompanySummaryData | null,
 status: App.Modules.Projects.Handoffs.Enums.DealHandoffStatusEnum,

@@ -1071,3 +1071,59 @@ it('enforces custom field immutability, stage_required_fields protection, pipeli
     ));
     expect($noteLocks)->toBeGreaterThan($beforeUpdateLocks);
 });
+
+it('fails closed in QueryEntityTimelineAction when activity source_type is unrecognized', function (): void {
+    $dept = Department::query()->create(['name' => 'Timeline Safety', 'slug' => 't12-tl-fail-closed']);
+    $admin = createTask12User($dept, 'EMP-TLFC-ADM', 'adm.tlfc@acme.internal', RoleEnum::Admin);
+    $repA = createTask12User($dept, 'EMP-TLFC-REP', 'rep.tlfc@acme.internal', RoleEnum::Sales);
+
+    $company = Company::query()->create(['name' => 'Fail Closed Co', 'owner_id' => $repA->id]);
+
+    $validTime = now()->toImmutable()->subMinutes(5);
+    $validActivity = app(RecordActivityAction::class)->execute(
+        actor: $repA,
+        activityType: ActivityTypeEnum::FieldUpdated,
+        sourceType: 'company',
+        sourceId: $company->id,
+        targets: ['company' => $company->id],
+        summary: 'Valid company field update',
+        occurredAt: $validTime,
+    );
+
+    foreach (['email_message', 'unknown_source'] as $index => $unknownSourceType) {
+        $actId = (string) Str::uuid7();
+        $ts = $validTime->addSeconds($index + 1)->utc()->format('Y-m-d H:i:s.u+00');
+
+        DB::table('activities')->insert([
+            'id' => $actId,
+            'actor_id' => $repA->id,
+            'activity_type' => ActivityTypeEnum::FieldUpdated->value,
+            'source_type' => $unknownSourceType,
+            'source_id' => (string) Str::uuid7(),
+            'visibility_mode' => 'source_policy',
+            'summary' => "Unrecognized {$unknownSourceType} entry",
+            'metadata' => '{}',
+            'occurred_at' => $ts,
+            'created_at' => $ts,
+        ]);
+
+        DB::table('activity_links')->insert([
+            'linkable_type' => 'company',
+            'linkable_id' => $company->id,
+            'occurred_at' => $ts,
+            'activity_id' => $actId,
+        ]);
+    }
+
+    $repTimeline = app(QueryEntityTimelineAction::class)->execute($repA, 'company', $company->id, null, 25);
+    expect(collect($repTimeline->items)->pluck('id')->all())->toBe([$validActivity->id]);
+
+    $adminTimeline = app(QueryEntityTimelineAction::class)->execute($admin, 'company', $company->id, null, 25);
+    expect(collect($adminTimeline->items)->pluck('id')->all())->toBe([$validActivity->id]);
+
+    $this->actingAs($repA)
+        ->getJson('/api/internal/crm/timeline?linkable_type=company&linkable_id='.$company->id)
+        ->assertOk()
+        ->assertJsonCount(1, 'items')
+        ->assertJsonPath('items.0.id', $validActivity->id);
+});

@@ -103,7 +103,7 @@ it('runs full end-to-end Deal Won -> submit -> changes_requested -> resubmit -> 
 
     $repA = $createProvisioningUser($salesDept, 'EMP-PR-REPA', 'rep.pr@acme.internal', RoleEnum::Sales);
     $opsMgr = $createProvisioningUser($deliveryDept, 'EMP-PR-OPS', 'ops.pr@acme.internal', RoleEnum::OperationsManager);
-    $pm = $createProvisioningUser($deliveryDept, 'EMP-PR-PM', 'pm.pr@acme.internal', RoleEnum::ProjectManager);
+    $pm = $createProvisioningUser($deliveryDept, 'EMP-PR-PM', 'pm.pr@acme.internal', RoleEnum::ProjectManager, $opsMgr);
     $am = $createProvisioningUser($salesDept, 'EMP-PR-AM', 'am.pr@acme.internal', RoleEnum::AccountManager);
     $suspendedOps = $createProvisioningUser($deliveryDept, 'EMP-PR-SOPS', 'sops.pr@acme.internal', RoleEnum::OperationsManager, null, UserStatusEnum::Suspended);
     $trashedOps = $createProvisioningUser($deliveryDept, 'EMP-PR-TOPS', 'tops.pr@acme.internal', RoleEnum::OperationsManager);

@@ -14,11 +14,17 @@ class LoadHandoffDetailAction
         protected DealHandoffQuerySupport $querySupport,
     ) {}
 
-    public function buildDetailData(DealHandoff $handoff): DealHandoffDetailData
+    public function buildDetailData(DealHandoff $handoff, ?User $viewer = null): DealHandoffDetailData
     {
         $loaded = $this->querySupport->loadFreshHandoff($handoff);
+        [$canViewCompany, $canViewDeal, $canViewProject] = $this->resolveVisibility($loaded, $viewer);
 
-        return DealHandoffDetailData::fromModel($loaded);
+        return DealHandoffDetailData::fromModel(
+            handoff: $loaded,
+            canViewCompany: $canViewCompany,
+            canViewDeal: $canViewDeal,
+            canViewProject: $canViewProject,
+        );
     }
 
     /**
@@ -31,9 +37,15 @@ class LoadHandoffDetailAction
         Gate::forUser($viewer)->authorize('view', $handoff);
 
         $loaded = $this->querySupport->loadFreshHandoff($handoff);
+        [$canViewCompany, $canViewDeal, $canViewProject] = $this->resolveVisibility($loaded, $viewer);
 
         return [
-            'handoff' => DealHandoffDetailData::fromModel($loaded),
+            'handoff' => DealHandoffDetailData::fromModel(
+                handoff: $loaded,
+                canViewCompany: $canViewCompany,
+                canViewDeal: $canViewDeal,
+                canViewProject: $canViewProject,
+            ),
             'templates' => $this->querySupport->templatesForViewer($viewer),
             'assignablePms' => $this->querySupport->assignablePmsForViewer($viewer),
             'assignableAms' => $this->querySupport->assignableAmsForViewer($viewer),
@@ -42,9 +54,25 @@ class LoadHandoffDetailAction
                 'requestChanges' => Gate::forUser($viewer)->allows('requestChanges', $loaded),
                 'reject' => Gate::forUser($viewer)->allows('reject', $loaded),
                 'approve' => Gate::forUser($viewer)->allows('approve', $loaded),
-                'viewProject' => $loaded->project !== null
-                    && Gate::forUser($viewer)->allows('view', $loaded->project),
+                'viewProject' => $canViewProject,
             ],
         ];
+    }
+
+    /**
+     * Resolve per-relationship cross-silo visibility flags for the handoff viewer.
+     *
+     * @return array{0: bool, 1: bool, 2: bool}
+     */
+    protected function resolveVisibility(DealHandoff $handoff, ?User $viewer): array
+    {
+        $canViewCompany = $handoff->company !== null
+            && ($viewer === null || Gate::forUser($viewer)->allows('view', $handoff->company));
+        $canViewDeal = $handoff->deal !== null
+            && ($viewer === null || Gate::forUser($viewer)->allows('view', $handoff->deal));
+        $canViewProject = $handoff->project !== null
+            && ($viewer === null || Gate::forUser($viewer)->allows('view', $handoff->project));
+
+        return [$canViewCompany, $canViewDeal, $canViewProject];
     }
 }

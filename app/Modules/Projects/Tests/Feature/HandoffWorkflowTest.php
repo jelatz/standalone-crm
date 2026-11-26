@@ -1,8 +1,10 @@
 <?php
 
 use App\Modules\Core\Rbac\Actions\GrantEntityCollaboratorAction;
+use App\Modules\Core\Rbac\Actions\RevokeEntityCollaboratorAction;
 use App\Modules\Core\Rbac\Enums\CollaboratorAccessLevel;
 use App\Modules\Core\Rbac\Enums\CollaboratorRoleLabel;
+use App\Modules\Core\Rbac\Enums\PermissionEnum;
 use App\Modules\Core\Rbac\Enums\RoleEnum;
 use App\Modules\Core\Users\Actions\RebuildUserHierarchyClosureAction;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
@@ -16,6 +18,7 @@ use App\Modules\Crm\Pipelines\Models\PipelineStage;
 use App\Modules\Crm\Timeline\Enums\ActivityTypeEnum;
 use App\Modules\Crm\Timeline\Models\Activity;
 use App\Modules\Crm\Timeline\Models\ActivityLink;
+use App\Modules\Projects\Handoffs\Actions\ListHandoffQueueAction;
 use App\Modules\Projects\Handoffs\Enums\DealHandoffStatusEnum;
 use App\Modules\Projects\Handoffs\Jobs\ProvisionProjectFromHandoffJob;
 use App\Modules\Projects\Handoffs\Models\DealHandoff;
@@ -26,6 +29,7 @@ use Database\Seeders\CrmDefaultsSeeder;
 use Database\Seeders\ProjectDefaultsSeeder;
 use Database\Seeders\RolesPermissionsSeeder;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -588,7 +592,8 @@ it('enforces RBAC permissions, cross-silo IDOR isolation, Inertia pages, templat
             ->where('handoffs.0.id', $handoffA->id)
         );
 
-    // Assigned PM can view Handoff A detail and request changes; Unassigned PM cannot; Rep A cannot
+    // Assigned PM who can view Company & Project? No — $pmAssigned lacks Deal & Company visibility,
+    // so deal, company, and company_id are masked on HandoffDetailPage while assigned_pm/submitted_by remain intact.
     $this->actingAs($pmAssigned)
         ->get("/app/projects/handoffs/{$handoffA->id}")
         ->assertOk()
@@ -596,11 +601,15 @@ it('enforces RBAC permissions, cross-silo IDOR isolation, Inertia pages, templat
             ->component('projects/pages/HandoffDetailPage')
             ->where('unreadCounts.handoffs', 0)
             ->where('handoff.id', $handoffA->id)
+            ->where('handoff.company_id', null)
+            ->where('handoff.company', null)
+            ->where('handoff.deal', null)
             ->where('handoff.submitted_by.id', $repA->id)
             ->where('handoff.assigned_pm.id', $pmAssigned->id)
             ->where('handoff.assigned_am.id', $am->id)
             ->where('can.requestChanges', true)
             ->where('can.approve', false)
+            ->where('can.viewProject', false)
         );
 
     $this->actingAs($pmUnassigned)
@@ -794,7 +803,11 @@ it('masks cross-silo company and provisioned project fields on activeHandoff whe
             'assigned_pm_id' => $pm->id,
             'assigned_am_id' => $am->id,
         ])
-        ->assertOk();
+        ->assertOk()
+        ->assertJsonPath('company_id', null)
+        ->assertJsonPath('company', null)
+        ->assertJsonPath('deal', null)
+        ->assertJsonPath('provisioned_project', null);
 
     $handoff = DealHandoff::query()->with('project')->findOrFail($handoffId);
     expect($handoff->project)->not->toBeNull();
@@ -813,6 +826,19 @@ it('masks cross-silo company and provisioned project fields on activeHandoff whe
             ->where('activeHandoff.company_name', null)
             ->where('activeHandoff.provisioned_project', null));
 
+    // Handoff detail page also masks company_id, company, and provisioned_project for deal-only collaborator
+    $this->actingAs($collabOnly)
+        ->get("/app/projects/handoffs/{$handoffId}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('projects/pages/HandoffDetailPage')
+            ->where('handoff.id', $handoffId)
+            ->where('handoff.deal.id', $wonDeal->id)
+            ->where('handoff.company_id', null)
+            ->where('handoff.company', null)
+            ->where('handoff.provisioned_project', null)
+            ->where('can.viewProject', false));
+
     // Handoff queue also masks company and provisioned_project consistently for the deal-only collaborator
     $this->actingAs($collabOnly)
         ->get('/app/projects/handoffs')
@@ -824,6 +850,23 @@ it('masks cross-silo company and provisioned project fields on activeHandoff whe
             ->where('handoffs.0.company_name', null)
             ->where('handoffs.0.provisioned_project', null));
 
+    // Assigned PM lacking Deal & Company visibility (e.g. CRM collaborators revoked) gets deal/company/company_id masked on HandoffDetailPage
+    // while retaining provisioned_project visibility and can.viewProject === true
+    app(RevokeEntityCollaboratorAction::class)->execute($company, $pm);
+    app(RevokeEntityCollaboratorAction::class)->execute($wonDeal, $pm);
+
+    $this->actingAs($pm)
+        ->get("/app/projects/handoffs/{$handoffId}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('projects/pages/HandoffDetailPage')
+            ->where('handoff.id', $handoffId)
+            ->where('handoff.deal', null)
+            ->where('handoff.company', null)
+            ->where('handoff.company_id', null)
+            ->where('handoff.provisioned_project.id', $projectId)
+            ->where('can.viewProject', true));
+
     // Assigned AM who can view Company & Project receives full company + provisioned_project summary
     $this->actingAs($am)
         ->get("/app/crm/deals/{$wonDeal->id}")
@@ -833,4 +876,94 @@ it('masks cross-silo company and provisioned project fields on activeHandoff whe
             ->where('activeHandoff.company_id', $company->id)
             ->where('activeHandoff.company_name', $company->name)
             ->where('activeHandoff.provisioned_project.id', $projectId));
+
+    $this->actingAs($am)
+        ->get("/app/projects/handoffs/{$handoffId}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('projects/pages/HandoffDetailPage')
+            ->where('handoff.id', $handoffId)
+            ->where('handoff.deal.id', $wonDeal->id)
+            ->where('handoff.company_id', $company->id)
+            ->where('handoff.company.id', $company->id)
+            ->where('handoff.provisioned_project.id', $projectId)
+            ->where('can.viewProject', true));
+});
+
+it('enforces deals.view permission parity in ListHandoffQueueAction for users holding handoffs.view without deals.view', function (): void {
+    $dept = Department::query()->create(['name' => 'No Deals Silo', 'slug' => 'handoff-nodeals-silo']);
+
+    // Manager has handoffs.view ONLY (no deals.view), and Rep reports to Manager so Deal::visibleTo($mgrNoDeals) would match without deals.view parity.
+    $mgrNoDeals = createHandoffWorkflowUser($dept, 'EMP-ND-MGR', 'mgr.nd@acme.internal', null);
+    $mgrNoDeals->givePermissionTo(PermissionEnum::HandoffsView->value);
+
+    $collabNoDeals = createHandoffWorkflowUser($dept, 'EMP-ND-COL', 'col.nd@acme.internal', null);
+    $collabNoDeals->givePermissionTo(PermissionEnum::HandoffsView->value);
+
+    $rep = createHandoffWorkflowUser($dept, 'EMP-ND-REP', 'rep.nd@acme.internal', RoleEnum::Sales, $mgrNoDeals);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $wonStage = $pipeline->stages()->where('stage_type', PipelineStageTypeEnum::Won->value)->firstOrFail();
+    [$company1, $deal1] = createDealForHandoff($rep, $pipeline, $wonStage, 'Rep Deal 1');
+    [$company2, $deal2] = createDealForHandoff($rep, $pipeline, $wonStage, 'Rep Deal 2');
+
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $deal1,
+        user: $collabNoDeals,
+        accessLevel: CollaboratorAccessLevel::Viewer,
+        roleLabel: CollaboratorRoleLabel::Observer,
+        grantedBy: $rep,
+    );
+
+    $handoff1 = DealHandoff::query()->create([
+        'deal_id' => $deal1->id,
+        'company_id' => $company1->id,
+        'submitted_by_id' => $rep->id,
+        'status' => DealHandoffStatusEnum::PendingReview,
+        'scope_notes_json' => validScopeNotes('Rep 1 handoff'),
+        'submitted_at' => now(),
+    ]);
+
+    $handoff2 = DealHandoff::query()->create([
+        'deal_id' => $deal2->id,
+        'company_id' => $company2->id,
+        'submitted_by_id' => $rep->id,
+        'assigned_pm_id' => $collabNoDeals->id,
+        'status' => DealHandoffStatusEnum::ChangesRequested,
+        'scope_notes_json' => validScopeNotes('Assigned to collabNoDeals'),
+        'submitted_at' => now()->subMinute(),
+    ]);
+
+    // Policy denies $mgrNoDeals and $collabNoDeals on $handoff1 because neither holds deals.view
+    expect(Gate::forUser($mgrNoDeals)->allows('view', $handoff1))->toBeFalse()
+        ->and(Gate::forUser($collabNoDeals)->allows('view', $handoff1))->toBeFalse()
+        ->and(Gate::forUser($collabNoDeals)->allows('view', $handoff2))->toBeTrue();
+
+    $this->actingAs($mgrNoDeals)->get("/app/projects/handoffs/{$handoff1->id}")->assertForbidden();
+    $this->actingAs($collabNoDeals)->get("/app/projects/handoffs/{$handoff1->id}")->assertForbidden();
+
+    // ListHandoffQueueAction + statusCounts exclude other rep's deal handoffs when viewer lacks deals.view
+    $mgrQueue = app(ListHandoffQueueAction::class)->execute($mgrNoDeals);
+    expect($mgrQueue['handoffs'])->toBeEmpty()
+        ->and($mgrQueue['statusCounts'])->toBe([
+            DealHandoffStatusEnum::PendingReview->value => 0,
+            DealHandoffStatusEnum::ChangesRequested->value => 0,
+            DealHandoffStatusEnum::Approved->value => 0,
+            DealHandoffStatusEnum::Provisioned->value => 0,
+            DealHandoffStatusEnum::Rejected->value => 0,
+        ]);
+
+    $this->actingAs($mgrNoDeals)
+        ->get('/app/projects/handoffs')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('handoffs', 0)
+            ->where('statusCounts.pending_review', 0)
+            ->where('statusCounts.changes_requested', 0));
+
+    // $collabNoDeals sees ONLY $handoff2 (via assigned_pm_id), NOT $handoff1 (despite Deal collaborator grant)
+    $collabQueue = app(ListHandoffQueueAction::class)->execute($collabNoDeals);
+    expect(collect($collabQueue['handoffs'])->pluck('id')->all())->toBe([$handoff2->id])
+        ->and($collabQueue['statusCounts'][DealHandoffStatusEnum::PendingReview->value])->toBe(0)
+        ->and($collabQueue['statusCounts'][DealHandoffStatusEnum::ChangesRequested->value])->toBe(1);
 });

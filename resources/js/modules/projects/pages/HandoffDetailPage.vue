@@ -56,7 +56,7 @@ watch(
 
 const dealTarget = computed(() => ({
     id: localHandoff.value.deal_id,
-    title: localHandoff.value.deal?.title ?? 'Deal Handoff',
+    title: localHandoff.value.deal?.title ?? 'Deal restricted',
     amount_cents: localHandoff.value.deal?.amount_cents ?? null,
     currency: localHandoff.value.deal?.currency ?? 'USD',
     company_name: localHandoff.value.company?.name ?? null,
@@ -85,7 +85,7 @@ function handleUpdated(updated: App.Modules.Projects.Handoffs.Data.DealHandoffDe
 </script>
 
 <template>
-    <Head :title="`Handoff — ${localHandoff.deal?.title ?? 'Deal Brief'}`" />
+    <Head :title="`Handoff — ${localHandoff.deal?.title ?? 'Deal restricted'}`" />
 
     <div class="space-y-4">
         <!-- Offline / Reconnecting Banner -->
@@ -113,13 +113,13 @@ function handleUpdated(updated: App.Modules.Projects.Handoffs.Data.DealHandoffDe
                     </Link>
                     <ChevronRight class="h-3.5 w-3.5 text-muted" :stroke-width="1.75" aria-hidden="true" />
                     <span class="truncate font-medium text-primary">
-                        {{ localHandoff.deal?.title ?? 'Deal Handoff' }}
+                        {{ localHandoff.deal?.title ?? 'Deal restricted' }}
                     </span>
                 </nav>
 
                 <div class="flex flex-wrap items-center gap-2">
                     <h2 class="truncate text-[18px] font-semibold tracking-[-0.02em] text-primary">
-                        {{ localHandoff.deal?.title ?? 'Deal Handoff Brief' }}
+                        {{ localHandoff.deal?.title ?? 'Deal restricted' }}
                     </h2>
                     <Badge :variant="handoffStatusVariant(localHandoff.status)">
                         {{ handoffStatusLabel(localHandoff.status) }}
@@ -135,7 +135,9 @@ function handleUpdated(updated: App.Modules.Projects.Handoffs.Data.DealHandoffDe
 
             <div class="flex flex-wrap shrink-0 items-center gap-2">
                 <Link
+                    v-if="localHandoff.deal"
                     :href="`/app/crm/deals/${localHandoff.deal_id}`"
+                    data-testid="handoff-view-deal-link"
                     class="inline-flex h-8 items-center rounded-[6px] border border-default bg-surface px-3 text-[12px] font-medium text-primary hover:bg-subtle"
                 >
                     View Won Deal
@@ -209,11 +211,14 @@ function handleUpdated(updated: App.Modules.Projects.Handoffs.Data.DealHandoffDe
                                 <Link
                                     v-if="localHandoff.company"
                                     :href="`/app/crm/companies/${localHandoff.company.id}`"
+                                    data-testid="handoff-company-link"
                                     class="text-accent-primary hover:underline"
                                 >
                                     {{ localHandoff.company.name }}
                                 </Link>
-                                <span v-else>—</span>
+                                <span v-else data-testid="handoff-restricted-company" class="text-muted">
+                                    Restricted client
+                                </span>
                             </dd>
                         </div>
                         <div>
