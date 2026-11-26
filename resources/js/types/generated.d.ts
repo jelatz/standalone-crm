@@ -256,6 +256,124 @@ export type CustomFieldTypeEnum = 'text' | 'textarea' | 'number' | 'currency' | 
 }
 namespace Deals {
 namespace Data {
+export type CreateDealData = {
+company_id: string,
+title: string,
+primary_contact_id: string | null,
+pipeline_id: string | null,
+stage_id: string | null,
+account_manager_id: string | null,
+amount_cents: number,
+currency: string,
+expected_close_date: string | null,
+lost_reason: string | null,
+custom_fields: Record<string, any>,
+stakeholders: App.Modules.Crm.Deals.Data.DealStakeholderInputData[] | null,
+};
+export type DealCardData = {
+id: string,
+company_id: string | null,
+company_name: string | null,
+primary_contact_id: string | null,
+primary_contact_name: string | null,
+pipeline_id: string,
+stage_id: string,
+stage_name: string | null,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+title: string,
+amount_cents: number,
+currency: string,
+expected_close_date: string | null,
+stage_entered_at: string,
+won_at: string | null,
+lost_at: string | null,
+board_position: number,
+version: number,
+is_rotting: boolean,
+custom_fields: Record<string, any>,
+updated_at: string,
+};
+export type DealDetailData = {
+id: string,
+company_id: string | null,
+company_name: string | null,
+company_domain: string | null,
+primary_contact_id: string | null,
+primary_contact_name: string | null,
+primary_contact_email: string | null,
+pipeline_id: string,
+pipeline_name: string | null,
+stage_id: string,
+stage_name: string | null,
+stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | null,
+stage_win_probability: number | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+title: string,
+amount_cents: number,
+currency: string,
+expected_close_date: string | null,
+stage_entered_at: string,
+won_at: string | null,
+lost_at: string | null,
+lost_reason: string | null,
+board_position: number,
+version: number,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type DealFilterData = {
+view: string | null,
+pipeline_id: string | null,
+stage_id: string | null,
+owner_id: string | null,
+company_id: string | null,
+search: string | null,
+custom_fields: Record<string, any> | null,
+sort_by: string | null,
+sort_dir: string | null,
+page: number | null,
+per_page: number | null,
+};
+export type DealKanbanBoardData = {
+pipeline: App.Modules.Crm.Pipelines.Data.PipelineData,
+columns: App.Modules.Crm.Deals.Data.DealKanbanStageColumnData[],
+total_deals_count: number,
+total_amount_cents: number,
+};
+export type DealKanbanStageColumnData = {
+stage: App.Modules.Crm.Pipelines.Data.PipelineStageData,
+deals_count: number,
+total_amount_cents: number,
+deals: App.Modules.Crm.Deals.Data.DealCardData[],
+};
+export type DealStakeholderData = {
+contact_id: string,
+full_name: string,
+primary_email: string | null,
+job_title: string | null,
+stakeholder_role: App.Modules.Crm.Deals.Enums.DealStakeholderRoleEnum,
+};
+export type DealStakeholderInputData = {
+contact_id: string,
+stakeholder_role: App.Modules.Crm.Deals.Enums.DealStakeholderRoleEnum,
+};
+export type MoveDealStageData = {
+target_stage_id: string,
+expected_version: number,
+before_deal_id: string | null,
+after_deal_id: string | null,
+core_field_updates: Record<string, any>,
+custom_field_updates: Record<string, any>,
+override_gates: boolean,
+};
 export type RelatedDealData = {
 id: string,
 company_id: string,
@@ -276,6 +394,23 @@ expected_close_date: string | null,
 won_at: string | null,
 lost_at: string | null,
 updated_at: string,
+};
+export type SyncDealContactsData = {
+contacts: App.Modules.Crm.Deals.Data.DealStakeholderInputData[],
+};
+export type UpdateDealData = {
+expected_version: number,
+company_id: undefined | string,
+primary_contact_id: undefined | string | null,
+stage_id: undefined | string,
+account_manager_id: undefined | string | null,
+title: undefined | string,
+amount_cents: undefined | number,
+currency: undefined | string,
+expected_close_date: undefined | string | null,
+lost_reason: undefined | string | null,
+custom_fields: Record<string, any> | undefined,
+override_gates: boolean,
 };
 }
 namespace Enums {

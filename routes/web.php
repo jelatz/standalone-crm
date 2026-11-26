@@ -8,13 +8,6 @@ Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function ()
     Route::inertia('/', 'core/pages/WorkspaceHomePage')
         ->name('app.home');
 
-    Route::inertia('/crm/deals', 'core/pages/ModulePlaceholderPage', [
-        'moduleKey' => 'crm.deals',
-        'moduleTitle' => 'Deals Pipeline',
-        'moduleDescription' => 'Multi-pipeline Kanban & table views with stage-gated custom fields (Phase 1).',
-        'phaseLabel' => 'Phase 1',
-    ])->name('crm.deals');
-
     Route::inertia('/projects/handoffs', 'core/pages/ModulePlaceholderPage', [
         'moduleKey' => 'projects.handoffs',
         'moduleTitle' => 'Handoff Intake',
