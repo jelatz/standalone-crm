@@ -46,6 +46,8 @@ class DealDetailData extends Data
         public string $updated_at,
         public bool $has_masked_company = false,
         public bool $has_masked_primary_contact = false,
+        public ?int $win_probability = null,
+        public int $effective_win_probability = 0,
     ) {}
 
     public static function fromModel(
@@ -61,6 +63,10 @@ class DealDetailData extends Data
         $stage = $deal->relationLoaded('stage') ? $deal->stage : null;
         $owner = $deal->relationLoaded('owner') ? $deal->owner : null;
         $accountManager = $deal->relationLoaded('accountManager') ? $deal->accountManager : null;
+
+        $effectiveWinProbability = $deal->win_probability !== null
+            ? (int) $deal->win_probability
+            : ($stage?->win_probability ?? 0);
 
         return new self(
             id: (string) $deal->id,
@@ -99,6 +105,8 @@ class DealDetailData extends Data
             updated_at: $deal->updated_at?->toIso8601String() ?? now()->toIso8601String(),
             has_masked_company: $hasMaskedCompany,
             has_masked_primary_contact: $hasMaskedPrimaryContact,
+            win_probability: $deal->win_probability !== null ? (int) $deal->win_probability : null,
+            effective_win_probability: $effectiveWinProbability,
         );
     }
 }

@@ -1,37 +1,11 @@
 import { ref } from 'vue';
 import { defineStore } from 'pinia';
-import { router } from '@inertiajs/vue3';
 import {
     getEcho,
     subscribeEchoConnectionState,
     type RealtimeConnectionState,
     type RealtimeEchoClient,
 } from '@/echo';
-import { useUnreadsStore } from './unreads.store';
-
-export const HANDOFF_STATUS_CHANGED_EVENT =
-    '.App\\Modules\\Projects\\Handoffs\\Events\\HandoffStatusChanged';
-
-interface UnreadPayload {
-    chat?: number;
-    sharedInbox?: number;
-    handoffs?: number;
-    notifications?: number;
-}
-
-interface HandoffStatusChangedPayload {
-    handoff_id?: string;
-    status?: string;
-    deal_id?: string;
-}
-
-function isUnreadPayload(payload: unknown): payload is UnreadPayload {
-    return typeof payload === 'object' && payload !== null;
-}
-
-function isHandoffStatusPayload(payload: unknown): payload is HandoffStatusChangedPayload {
-    return typeof payload === 'object' && payload !== null;
-}
 
 export const useRealtimeStore = defineStore('realtime', () => {
     const status = ref<RealtimeConnectionState>('disconnected');
@@ -41,32 +15,8 @@ export const useRealtimeStore = defineStore('realtime', () => {
 
     let activeClient: RealtimeEchoClient | null = null;
     let unsubscribeConnection: (() => void) | null = null;
-    let handoffReloadTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function clearHandoffReloadTimer(): void {
-        if (handoffReloadTimer !== null) {
-            clearTimeout(handoffReloadTimer);
-            handoffReloadTimer = null;
-        }
-    }
-
-    function scheduleUnreadCountsReload(): void {
-        if (typeof router?.reload !== 'function') {
-            return;
-        }
-
-        clearHandoffReloadTimer();
-        handoffReloadTimer = setTimeout(() => {
-            handoffReloadTimer = null;
-            if (typeof router?.reload === 'function') {
-                router.reload({ only: ['unreadCounts'] });
-            }
-        }, 250);
-    }
 
     function teardownSubscription(): void {
-        clearHandoffReloadTimer();
-
         if (unsubscribeConnection !== null) {
             unsubscribeConnection();
             unsubscribeConnection = null;
@@ -121,28 +71,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
             }
         });
 
-        const unreadsStore = useUnreadsStore();
         const channel = nextClient.private(`user.${userId}`);
-
-        channel.notification(() => {
-            unreadsStore.increment('notifications', 1);
-        });
-
-        channel.listen('.unreads.updated', (payload: unknown) => {
-            if (isUnreadPayload(payload)) {
-                unreadsStore.setCounts(payload);
-            }
-        });
-
-        const handleHandoffStatusChanged = (payload: unknown): void => {
-            if (isHandoffStatusPayload(payload) && payload.status === 'pending_review') {
-                unreadsStore.increment('handoffs', 1);
-            }
-            scheduleUnreadCountsReload();
-        };
-
-        channel.listen(HANDOFF_STATUS_CHANGED_EVENT, handleHandoffStatusChanged);
-        channel.listen('.HandoffStatusChanged', handleHandoffStatusChanged);
 
         channel.error((error: unknown) => {
             lastError.value =

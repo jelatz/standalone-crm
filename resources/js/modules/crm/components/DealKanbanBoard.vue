@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
-import { AlertCircle, AlertTriangle, Calendar, CheckCircle2, ClipboardCheck, RefreshCw } from 'lucide-vue-next';
+import { AlertCircle, AlertTriangle, Calendar, RefreshCw } from 'lucide-vue-next';
 import Badge, { type BadgeVariant } from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
-import HandoffSubmitDrawer, { type HandoffDealTarget } from '@/modules/projects/components/HandoffSubmitDrawer.vue';
 import StageGateModal, { type StageGateSubmitPayload } from './StageGateModal.vue';
 import { getEcho, type RealtimeChannelLike } from '@/echo';
-import { useAuthStore } from '@/stores/auth.store';
 import {
     crmApi,
     extractFirstFieldErrors,
@@ -20,13 +18,15 @@ import {
     formatShortDate,
     getInitials,
 } from '@/modules/crm/utils/formatters';
+import { useAuthStore } from '@/stores/auth.store';
+
+const authStore = useAuthStore();
 
 const props = withDefaults(
     defineProps<{
         board: App.Modules.Crm.Deals.Data.DealKanbanBoardData;
         customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
         assignableUsers?: App.Modules.Core.Users.Data.UserSummaryData[];
-        assignableAms?: App.Modules.Core.Users.Data.UserSummaryData[];
         contacts?: Array<{
             id: string;
             full_name: string;
@@ -35,67 +35,18 @@ const props = withDefaults(
         }>;
         canMoveDeals?: boolean;
         canOverrideGates?: boolean;
-        canSubmitHandoff?: boolean;
     }>(),
     {
         assignableUsers: () => [],
-        assignableAms: () => [],
         contacts: () => [],
         canMoveDeals: true,
         canOverrideGates: false,
-        canSubmitHandoff: undefined,
     },
 );
 
 const emit = defineEmits<{
     dealMoved: [deal: App.Modules.Crm.Deals.Data.DealDetailData];
-    handoffSubmitted: [handoff: App.Modules.Projects.Handoffs.Data.DealHandoffDetailData];
 }>();
-
-const authStore = useAuthStore();
-
-const effectiveCanSubmitHandoff = computed(
-    () => props.canSubmitHandoff ?? authStore.hasPermission('handoffs.submit'),
-);
-const effectiveAssignableAms = computed(() =>
-    props.assignableAms.length > 0 ? props.assignableAms : props.assignableUsers,
-);
-
-const handoffDrawerOpen = ref<boolean>(false);
-const handoffDrawerDeal = ref<HandoffDealTarget | null>(null);
-const submittedHandoffBanner = ref<App.Modules.Projects.Handoffs.Data.DealHandoffDetailData | null>(
-    null,
-);
-
-function maybeOpenWonHandoffDrawer(
-    updated: App.Modules.Crm.Deals.Data.DealDetailData,
-    previousStageType: string | null,
-): void {
-    if (
-        previousStageType === 'won'
-        || updated.stage_type !== 'won'
-        || !effectiveCanSubmitHandoff.value
-    ) {
-        return;
-    }
-
-    handoffDrawerDeal.value = {
-        id: updated.id,
-        title: updated.title,
-        amount_cents: updated.amount_cents,
-        currency: updated.currency,
-        company_name: updated.company_name,
-        account_manager_id: updated.account_manager_id,
-    };
-    handoffDrawerOpen.value = true;
-}
-
-function handleHandoffSubmitted(
-    handoff: App.Modules.Projects.Handoffs.Data.DealHandoffDetailData,
-): void {
-    submittedHandoffBanner.value = handoff;
-    emit('handoffSubmitted', handoff);
-}
 
 type ColumnData = App.Modules.Crm.Deals.Data.DealKanbanStageColumnData;
 type DealCard = App.Modules.Crm.Deals.Data.DealCardData;
@@ -161,8 +112,7 @@ const boardSummary = computed(() => {
     for (const col of localColumns.value) {
         totalDeals += col.deals_count;
         totalCents += col.total_amount_cents;
-        const probability = Number(col.stage.win_probability ?? 0) / 100;
-        weightedCents += Math.round(col.total_amount_cents * probability);
+        weightedCents += columnWeightedCents(col);
         if (col.deals[0]?.currency) {
             primaryCurrency = col.deals[0].currency;
         }
@@ -187,8 +137,10 @@ function stageTypeVariant(stageType: App.Modules.Crm.Pipelines.Enums.PipelineSta
 }
 
 function columnWeightedCents(col: ColumnData): number {
-    const probability = Number(col.stage.win_probability ?? 0) / 100;
-    return Math.round(col.total_amount_cents * probability);
+    return col.deals.reduce((sum, deal) => {
+        const prob = Number(deal.effective_win_probability ?? col.stage.win_probability ?? 0) / 100;
+        return sum + Math.round((deal.amount_cents ?? 0) * prob);
+    }, 0);
 }
 
 function findDealInBoard(dealId: string): DealCard | null {
@@ -244,6 +196,8 @@ function applyDealMoveInColumns(
               amount_cents: updatedDeal.amount_cents,
               currency: updatedDeal.currency,
               expected_close_date: updatedDeal.expected_close_date,
+              win_probability: updatedDeal.win_probability,
+              effective_win_probability: updatedDeal.effective_win_probability,
               stage_entered_at: updatedDeal.stage_entered_at,
               won_at: updatedDeal.won_at,
               lost_at: updatedDeal.lost_at,
@@ -341,7 +295,6 @@ async function moveDeal(
             neighbors.insertIndex,
         );
         emit('dealMoved', updated);
-        maybeOpenWonHandoffDrawer(updated, previousStageType);
     } catch (error) {
         // Always rollback optimistic state on failure
         localColumns.value = snapshot;
@@ -401,7 +354,6 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
         );
         pendingGateMove.value = null;
         emit('dealMoved', updated);
-        maybeOpenWonHandoffDrawer(updated, previousStageType);
     } catch (error) {
         if (error instanceof StageGateValidationError) {
             pending.missingCoreFields = error.missingCoreFields;
@@ -655,38 +607,6 @@ onUnmounted(() => {
             </button>
         </div>
 
-        <!-- Handoff Submitted Confirmation Banner -->
-        <div
-            v-if="submittedHandoffBanner"
-            role="status"
-            data-testid="kanban-handoff-submitted-banner"
-            class="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-status-success/35 bg-status-success/10 px-3.5 py-2.5 text-[12px] text-primary"
-        >
-            <div class="flex items-center gap-2">
-                <CheckCircle2 class="h-4 w-4 shrink-0 text-status-success" :stroke-width="1.75" aria-hidden="true" />
-                <span>
-                    Deal handoff submitted for
-                    <strong>{{ submittedHandoffBanner.deal?.title ?? 'won deal' }}</strong>.
-                </span>
-            </div>
-            <div class="flex items-center gap-2">
-                <Link
-                    :href="`/app/projects/handoffs/${submittedHandoffBanner.id}`"
-                    class="inline-flex items-center gap-1 font-medium text-accent-primary hover:underline"
-                >
-                    <ClipboardCheck class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
-                    <span>View Handoff</span>
-                </Link>
-                <button
-                    type="button"
-                    class="text-[11px] text-secondary hover:text-primary cursor-pointer"
-                    @click="submittedHandoffBanner = null"
-                >
-                    Dismiss
-                </button>
-            </div>
-        </div>
-
         <!-- Multi-Column Hairline Kanban Grid -->
         <div class="overflow-x-auto pb-2">
             <div class="flex min-w-max items-stretch divide-x divide-default rounded-[8px] border border-default bg-surface">
@@ -856,15 +776,6 @@ onUnmounted(() => {
             :submitting="gateSubmitting"
             @update:open="!$event ? (pendingGateMove = null) : undefined"
             @submit="handleGateSubmit"
-        />
-
-        <!-- Won Deal Handoff Submit Drawer -->
-        <HandoffSubmitDrawer
-            :open="handoffDrawerOpen"
-            :deal="handoffDrawerDeal"
-            :assignable-ams="effectiveAssignableAms"
-            @update:open="handoffDrawerOpen = $event"
-            @submitted="handleHandoffSubmitted"
         />
     </div>
 </template>

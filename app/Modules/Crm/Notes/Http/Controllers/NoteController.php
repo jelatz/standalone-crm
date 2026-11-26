@@ -10,11 +10,8 @@ use App\Modules\Crm\Notes\Actions\TogglePinNoteAction;
 use App\Modules\Crm\Notes\Actions\UpdateNoteAction;
 use App\Modules\Crm\Notes\Data\CreateNoteData;
 use App\Modules\Crm\Notes\Data\NoteData;
-use App\Modules\Crm\Notes\Data\NoteTargetData;
 use App\Modules\Crm\Notes\Data\UpdateNoteData;
 use App\Modules\Crm\Notes\Models\Note;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -28,22 +25,6 @@ class NoteController extends Controller
         Gate::forUser($request->user())->authorize('create', Note::class);
 
         $data = CreateNoteData::validateAndCreate($request->all());
-
-        /** @var list<Model> $targetModels */
-        $targetModels = [];
-        foreach ($data->targets as $target) {
-            /** @var NoteTargetData $target */
-            $modelClass = Relation::getMorphedModel($target->linkable_type);
-            abort_if($modelClass === null || ! class_exists($modelClass), 422);
-            $targetModels[] = $modelClass::query()->findOrFail($target->linkable_id);
-        }
-
-        $primaryTarget = $targetModels[0] ?? null;
-        Gate::forUser($request->user())->authorize('create', [Note::class, $primaryTarget]);
-
-        foreach ($targetModels as $targetModel) {
-            Gate::forUser($request->user())->authorize('update', $targetModel);
-        }
 
         /** @var User $actor */
         $actor = $request->user();

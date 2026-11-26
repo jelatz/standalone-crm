@@ -73,7 +73,7 @@ role_label: App.Modules.Core.Rbac.Enums.CollaboratorRoleLabel,
 namespace Enums {
 export type CollaboratorAccessLevel = 'viewer' | 'editor' | 'manager';
 export type CollaboratorRoleLabel = 'account_manager' | 'project_manager' | 'sales_overlay' | 'support_lead' | 'it_lead' | 'observer';
-export type PermissionEnum = 'companies.view' | 'companies.create' | 'companies.update' | 'companies.delete' | 'contacts.view' | 'contacts.create' | 'contacts.update' | 'contacts.delete' | 'deals.view' | 'deals.create' | 'deals.update' | 'deals.delete' | 'deals.move_stage' | 'deals.override_gates' | 'pipelines.view' | 'pipelines.manage' | 'custom_fields.view' | 'custom_fields.manage' | 'handoffs.view' | 'handoffs.submit' | 'handoffs.review' | 'handoffs.approve' | 'handoffs.request_info' | 'projects.view' | 'projects.create' | 'projects.update' | 'projects.delete' | 'projects.manage_templates' | 'tasks.view' | 'tasks.create' | 'tasks.update' | 'tasks.delete' | 'tasks.comment' | 'mailboxes.view_shared' | 'mailboxes.reply_shared' | 'mailboxes.assign_shared' | 'mailboxes.manage_all' | 'mailboxes.connect_personal' | 'chat.view' | 'chat.send' | 'chat.manage_channels' | 'chat.admin' | 'admin.users' | 'admin.system_health';
+export type PermissionEnum = 'leads.view' | 'leads.create' | 'leads.update' | 'leads.delete' | 'leads.convert' | 'companies.view' | 'companies.create' | 'companies.update' | 'companies.delete' | 'contacts.view' | 'contacts.create' | 'contacts.update' | 'contacts.delete' | 'deals.view' | 'deals.create' | 'deals.update' | 'deals.delete' | 'deals.move_stage' | 'deals.override_gates' | 'pipelines.view' | 'pipelines.manage' | 'custom_fields.view' | 'custom_fields.manage' | 'admin.users' | 'admin.system_health';
 export type RoleEnum = 'superadmin' | 'admin' | 'director' | 'operations_manager' | 'sales' | 'account_manager' | 'project_manager' | 'support' | 'it';
 }
 }
@@ -158,7 +158,7 @@ custom_fields: Record<string, any> | undefined,
 };
 }
 namespace Enums {
-export type CompanyLifecycleStageEnum = 'lead' | 'prospect' | 'active_client' | 'churned' | 'partner';
+export type CompanyLifecycleStageEnum = 'prospect' | 'active_client' | 'churned' | 'partner';
 }
 }
 namespace Contacts {
@@ -253,7 +253,7 @@ sort_order: undefined | number,
 };
 }
 namespace Enums {
-export type CustomFieldEntityTypeEnum = 'company' | 'contact' | 'deal' | 'project';
+export type CustomFieldEntityTypeEnum = 'lead' | 'company' | 'contact' | 'deal';
 export type CustomFieldTypeEnum = 'text' | 'textarea' | 'number' | 'currency' | 'boolean' | 'date' | 'select' | 'multi_select' | 'user_id' | 'url';
 }
 }
@@ -269,6 +269,7 @@ account_manager_id: string | null,
 amount_cents: number,
 currency: string,
 expected_close_date: string | null,
+win_probability: number | null,
 lost_reason: string | null,
 custom_fields: Record<string, any>,
 stakeholders: App.Modules.Crm.Deals.Data.DealStakeholderInputData[] | null,
@@ -299,6 +300,8 @@ version: number,
 is_rotting: boolean,
 custom_fields: Record<string, any>,
 updated_at: string,
+win_probability: number | null,
+effective_win_probability: number,
 };
 export type DealDetailData = {
 id: string,
@@ -333,6 +336,8 @@ created_at: string,
 updated_at: string,
 has_masked_company: boolean,
 has_masked_primary_contact: boolean,
+win_probability: number | null,
+effective_win_probability: number,
 };
 export type DealFilterData = {
 view: string | null,
@@ -399,6 +404,8 @@ expected_close_date: string | null,
 won_at: string | null,
 lost_at: string | null,
 updated_at: string,
+win_probability: number | null,
+effective_win_probability: number,
 };
 export type SyncDealContactsData = {
 contacts: App.Modules.Crm.Deals.Data.DealStakeholderInputData[],
@@ -413,6 +420,7 @@ title: undefined | string,
 amount_cents: undefined | number,
 currency: undefined | string,
 expected_close_date: undefined | string | null,
+win_probability: undefined | number | null,
 lost_reason: undefined | string | null,
 custom_fields: Record<string, any> | undefined,
 override_gates: boolean,
@@ -420,6 +428,159 @@ override_gates: boolean,
 }
 namespace Enums {
 export type DealStakeholderRoleEnum = 'decision_maker' | 'champion' | 'billing' | 'technical_buyer' | 'influencer';
+}
+}
+namespace Leads {
+namespace Data {
+export type CommitLeadImportData = {
+rows: App.Modules.Crm.Leads.Data.ImportLeadRowPayloadData[],
+};
+export type ConvertLeadData = {
+company_mode: string,
+existing_company_id: string | null,
+company_name: string | null,
+company_domain: string | null,
+is_primary_contact: boolean,
+create_deal: boolean,
+deal_title: string | null,
+pipeline_id: string | null,
+stage_id: string | null,
+amount_cents: number,
+currency: string,
+expected_close_date: string | null,
+win_probability: number | null,
+};
+export type ConvertLeadResultData = {
+lead: App.Modules.Crm.Leads.Data.LeadDetailData,
+company_id: string,
+contact_id: string,
+deal_id: string | null,
+};
+export type ImportLeadRowPayloadData = {
+first_name: string,
+last_name: string,
+email: string | null,
+phone: string | null,
+job_title: string | null,
+company_name: string | null,
+website: string | null,
+source: string,
+estimated_value_cents: number | null,
+currency: string,
+custom_fields: Record<string, any>,
+};
+export type ImportLeadRowResultData = {
+row_index: number,
+full_name: string,
+company_name: string | null,
+email: string | null,
+source: string,
+outcome: string,
+reason: string | null,
+lead_id: string | null,
+payload: App.Modules.Crm.Leads.Data.ImportLeadRowPayloadData | null,
+};
+export type ImportLeadsPreviewData = {
+headers: string[],
+detected_mapping: Record<string, string | null>,
+mappable_fields: string[],
+total_rows: number,
+ready_count: number,
+duplicate_count: number,
+invalid_count: number,
+rows: App.Modules.Crm.Leads.Data.ImportLeadRowResultData[],
+};
+export type ImportLeadsResultData = {
+dry_run: boolean,
+total_rows: number,
+ready_count: number,
+inserted_count: number,
+duplicate_count: number,
+invalid_count: number,
+rows: App.Modules.Crm.Leads.Data.ImportLeadRowResultData[],
+};
+export type LeadDetailData = {
+id: string,
+owner_id: string,
+owner_name: string | null,
+first_name: string,
+last_name: string,
+full_name: string,
+email: string | null,
+phone: string | null,
+job_title: string | null,
+company_name: string | null,
+website: string | null,
+status: App.Modules.Crm.Leads.Enums.LeadStatusEnum,
+source: App.Modules.Crm.Leads.Enums.LeadSourceEnum,
+estimated_value_cents: number | null,
+currency: string,
+disqualified_reason: string | null,
+converted_at: string | null,
+converted_company_id: string | null,
+converted_contact_id: string | null,
+converted_deal_id: string | null,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+has_masked_converted_company: boolean,
+has_masked_converted_contact: boolean,
+has_masked_converted_deal: boolean,
+};
+export type LeadFilterData = {
+search: string | null,
+status: App.Modules.Crm.Leads.Enums.LeadStatusEnum | null,
+source: App.Modules.Crm.Leads.Enums.LeadSourceEnum | null,
+owner_id: string | null,
+custom_fields: Record<string, any> | null,
+sort_by: string | null,
+sort_dir: string | null,
+page: number | null,
+per_page: number | null,
+};
+export type LeadListItemData = {
+id: string,
+owner_id: string,
+owner_name: string | null,
+first_name: string,
+last_name: string,
+full_name: string,
+email: string | null,
+phone: string | null,
+job_title: string | null,
+company_name: string | null,
+website: string | null,
+status: App.Modules.Crm.Leads.Enums.LeadStatusEnum,
+source: App.Modules.Crm.Leads.Enums.LeadSourceEnum,
+estimated_value_cents: number | null,
+currency: string,
+converted_at: string | null,
+converted_company_id: string | null,
+converted_contact_id: string | null,
+converted_deal_id: string | null,
+custom_fields: Record<string, any>,
+created_at: string,
+updated_at: string,
+};
+export type UpsertLeadData = {
+first_name: undefined | string,
+last_name: undefined | string,
+email: undefined | string | null,
+phone: undefined | string | null,
+job_title: undefined | string | null,
+company_name: undefined | string | null,
+website: undefined | string | null,
+status: App.Modules.Crm.Leads.Enums.LeadStatusEnum | undefined,
+source: App.Modules.Crm.Leads.Enums.LeadSourceEnum | undefined,
+estimated_value_cents: undefined | number | null,
+currency: undefined | string,
+disqualified_reason: undefined | string | null,
+custom_fields: Record<string, any> | undefined,
+};
+}
+namespace Enums {
+export type LeadSourceEnum = 'inbound_web' | 'outbound' | 'referral' | 'event' | 'partner' | 'other';
+export type LeadStatusEnum = 'new' | 'contacted' | 'working' | 'qualified' | 'unqualified' | 'converted';
 }
 }
 namespace Notes {
@@ -445,6 +606,34 @@ linkable_id: string,
 };
 export type UpdateNoteData = {
 body_json: Record<string, any>,
+};
+}
+}
+namespace Overview {
+namespace Data {
+export type CrmOverviewData = {
+open_leads_count: number,
+qualified_leads_count: number,
+open_pipeline_cents: number,
+open_deals_count: number,
+weighted_forecast_cents: number,
+won_this_month_cents: number,
+won_this_month_count: number,
+companies_count: number,
+contacts_count: number,
+pipeline_name: string | null,
+stage_breakdown: App.Modules.Crm.Overview.Data.CrmOverviewStageSummaryData[],
+recent_leads: App.Modules.Crm.Leads.Data.LeadListItemData[],
+closing_soon_deals: App.Modules.Crm.Deals.Data.DealCardData[],
+};
+export type CrmOverviewStageSummaryData = {
+stage_id: string,
+stage_name: string,
+stage_type: string,
+win_probability: number,
+deals_count: number,
+total_amount_cents: number,
+weighted_amount_cents: number,
 };
 }
 }
@@ -515,357 +704,7 @@ has_more: boolean,
 };
 }
 namespace Enums {
-export type ActivityTypeEnum = 'note_created' | 'deal_created' | 'stage_changed' | 'field_updated' | 'task_created' | 'task_completed' | 'email_received' | 'email_sent' | 'chat_thread_created' | 'handoff_submitted' | 'handoff_approved' | 'project_provisioned';
-}
-}
-}
-namespace Projects {
-namespace Handoffs {
-namespace Data {
-export type ApproveHandoffData = {
-project_template_id: string,
-assigned_pm_id: string,
-assigned_am_id: undefined | string | null,
-project_name: undefined | string | null,
-target_kickoff_date: undefined | string | null,
-review_feedback: undefined | string | null,
-};
-export type DealHandoffDetailData = {
-id: string,
-deal_id: string,
-company_id: string | null,
-deal: App.Modules.Projects.Handoffs.Data.HandoffDealSummaryData | null,
-company: App.Modules.Projects.Handoffs.Data.HandoffCompanySummaryData | null,
-status: App.Modules.Projects.Handoffs.Enums.DealHandoffStatusEnum,
-scope_notes_json: Record<string, any>,
-handoff_checklist: {
-label: string,
-checked: boolean,
-}[],
-target_kickoff_date: string | null,
-review_feedback: string | null,
-submitted_by: App.Modules.Core.Users.Data.UserSummaryData | null,
-reviewed_by: App.Modules.Core.Users.Data.UserSummaryData | null,
-assigned_pm: App.Modules.Core.Users.Data.UserSummaryData | null,
-assigned_am: App.Modules.Core.Users.Data.UserSummaryData | null,
-template: App.Modules.Projects.Templates.Data.ProjectTemplateSummaryData | null,
-provisioned_project: App.Modules.Projects.Handoffs.Data.HandoffProjectSummaryData | null,
-submitted_at: string,
-reviewed_at: string | null,
-provisioned_at: string | null,
-created_at: string,
-updated_at: string,
-};
-export type DealHandoffSummaryData = {
-id: string,
-deal_id: string,
-company_id: string | null,
-deal_title: string | null,
-deal_amount_cents: number | null,
-deal_currency: string | null,
-company_name: string | null,
-status: App.Modules.Projects.Handoffs.Enums.DealHandoffStatusEnum,
-target_kickoff_date: string | null,
-review_feedback: string | null,
-submitted_by: App.Modules.Core.Users.Data.UserSummaryData | null,
-reviewed_by: App.Modules.Core.Users.Data.UserSummaryData | null,
-assigned_pm: App.Modules.Core.Users.Data.UserSummaryData | null,
-assigned_am: App.Modules.Core.Users.Data.UserSummaryData | null,
-template: App.Modules.Projects.Templates.Data.ProjectTemplateSummaryData | null,
-provisioned_project: App.Modules.Projects.Handoffs.Data.HandoffProjectSummaryData | null,
-submitted_at: string,
-reviewed_at: string | null,
-provisioned_at: string | null,
-};
-export type HandoffCompanySummaryData = {
-id: string,
-name: string,
-domain: string | null,
-lifecycle_stage: App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
-};
-export type HandoffDealSummaryData = {
-id: string,
-title: string,
-amount_cents: number,
-currency: string,
-stage_id: string,
-stage_name: string | null,
-stage_type: App.Modules.Crm.Pipelines.Enums.PipelineStageTypeEnum | null,
-};
-export type HandoffProjectSummaryData = {
-id: string,
-code: string,
-name: string,
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
-};
-export type ReviewHandoffData = {
-review_feedback: string,
-};
-export type SubmitHandoffData = {
-scope_notes_json: Record<string, any>,
-handoff_checklist: {
-label: string,
-checked: boolean,
-}[],
-target_kickoff_date: string | null,
-assigned_am_id: string | null,
-};
-}
-namespace Enums {
-export type DealHandoffStatusEnum = 'pending_review' | 'changes_requested' | 'approved' | 'provisioned' | 'rejected';
-}
-}
-namespace Projects {
-namespace Data {
-export type CreateProjectData = {
-name: string,
-company_id: string | null,
-primary_deal_id: string | null,
-owner_id: string | null,
-account_manager_id: string | null,
-department_id: string | null,
-description_json: Record<string, any> | null,
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
-start_date: string | null,
-target_end_date: string | null,
-custom_fields: Record<string, any>,
-stages: App.Modules.Projects.Projects.Data.ProjectStageInputData[] | null,
-};
-export type ManageProjectStagesData = {
-stages: App.Modules.Projects.Projects.Data.ProjectStageInputData[],
-};
-export type ProjectDetailData = {
-id: string,
-code: string,
-company_id: string | null,
-company_name: string | null,
-company_domain: string | null,
-primary_deal_id: string | null,
-primary_deal_title: string | null,
-deal_handoff_id: string | null,
-owner_id: string,
-owner_name: string | null,
-account_manager_id: string | null,
-account_manager_name: string | null,
-department_id: string,
-department_name: string | null,
-name: string,
-description_json: Record<string, any> | null,
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
-start_date: string | null,
-target_end_date: string | null,
-completed_at: string | null,
-custom_fields: Record<string, any>,
-has_masked_company: boolean,
-has_masked_deal: boolean,
-created_at: string,
-updated_at: string,
-};
-export type ProjectFilterData = {
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum | null,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum | null,
-owner_id: string | null,
-company_id: string | null,
-search: string | null,
-sort_by: string | null,
-sort_dir: string | null,
-page: number | null,
-per_page: number | null,
-};
-export type ProjectStageData = {
-id: string,
-project_id: string,
-name: string,
-category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum,
-sort_order: number,
-wip_limit: number | null,
-tasks_count: number,
-};
-export type ProjectStageInputData = {
-name: string,
-category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum,
-id: string | null,
-wip_limit: number | null,
-sort_order: number | null,
-};
-export type ProjectSummaryData = {
-id: string,
-code: string,
-company_id: string | null,
-company_name: string | null,
-primary_deal_id: string | null,
-primary_deal_title: string | null,
-deal_handoff_id: string | null,
-owner_id: string,
-owner_name: string | null,
-account_manager_id: string | null,
-account_manager_name: string | null,
-department_id: string,
-department_name: string | null,
-name: string,
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
-start_date: string | null,
-target_end_date: string | null,
-completed_at: string | null,
-tasks_count: number,
-completed_tasks_count: number,
-has_masked_company: boolean,
-has_masked_deal: boolean,
-created_at: string,
-updated_at: string,
-};
-export type ProjectWorkspaceData = {
-project: App.Modules.Projects.Projects.Data.ProjectDetailData,
-stages: App.Modules.Projects.Projects.Data.ProjectStageData[],
-columns: App.Modules.Projects.Tasks.Data.TaskStageColumnData[],
-tasks: App.Modules.Projects.Tasks.Data.TaskData[],
-collaborators: App.Modules.Core.Rbac.Data.EntityCollaboratorData[],
-attachments: App.Modules.Core.Attachments.Data.AttachmentSummaryData[],
-customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[],
-timeline: App.Modules.Crm.Timeline.Data.TimelinePageData,
-assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[],
-collaboratorAccessLevels: string[],
-collaboratorRoleLabels: string[],
-statuses: string[],
-healthOptions: string[],
-stageCategories: string[],
-taskPriorities: string[],
-taskStatuses: string[],
-can: {
-update: boolean,
-delete: boolean,
-manageStages: boolean,
-manageCollaborators: boolean,
-createTask: boolean,
-},
-};
-export type UpdateProjectData = {
-name: undefined | string,
-company_id: undefined | string | null,
-primary_deal_id: undefined | string | null,
-owner_id: undefined | string,
-account_manager_id: undefined | string | null,
-department_id: undefined | string,
-description_json: Record<string, any> | undefined | null,
-status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum | undefined,
-health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum | undefined,
-start_date: undefined | string | null,
-target_end_date: undefined | string | null,
-custom_fields: Record<string, any> | undefined,
-};
-}
-namespace Enums {
-export type ProjectHealthEnum = 'on_track' | 'at_risk' | 'off_track';
-export type ProjectStageCategoryEnum = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
-export type ProjectStatusEnum = 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
-}
-}
-namespace Tasks {
-namespace Data {
-export type CreateTaskData = {
-title: string,
-project_id: string | null,
-project_stage_id: string | null,
-parent_task_id: string | null,
-linkable_type: string | null,
-linkable_id: string | null,
-assignee_id: string | null,
-description_json: Record<string, any> | null,
-priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum,
-status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum | null,
-due_at: string | null,
-estimated_minutes: number | null,
-};
-export type MoveTaskData = {
-target_stage_id: string,
-expected_version: number,
-before_task_id: string | null,
-after_task_id: string | null,
-};
-export type MyWorkGroupData = {
-key: string,
-label: string,
-tasks_count: number,
-tasks: App.Modules.Projects.Tasks.Data.TaskData[],
-};
-export type TaskData = {
-id: string,
-project_id: string | null,
-project_code: string | null,
-project_name: string | null,
-project_stage_id: string | null,
-project_stage_name: string | null,
-project_stage_category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum | null,
-parent_task_id: string | null,
-linkable_type: string | null,
-linkable_id: string | null,
-creator_id: string,
-creator_name: string | null,
-assignee_id: string | null,
-assignee_name: string | null,
-title: string,
-description_json: Record<string, any> | null,
-priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum,
-status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum,
-board_position: number,
-due_at: string | null,
-completed_at: string | null,
-estimated_minutes: number | null,
-version: number,
-subtasks_count: number,
-watchers_count: number,
-watcher_ids: string[],
-is_watching: boolean,
-has_masked_linkable: boolean,
-created_at: string,
-updated_at: string,
-};
-export type TaskStageColumnData = {
-stage: App.Modules.Projects.Projects.Data.ProjectStageData,
-tasks_count: number,
-tasks: App.Modules.Projects.Tasks.Data.TaskData[],
-};
-export type ToggleTaskWatcherData = {
-user_id: string | null,
-watching: boolean | null,
-};
-export type UpdateTaskData = {
-expected_version: number,
-title: undefined | string,
-description_json: Record<string, any> | undefined | null,
-assignee_id: undefined | string | null,
-priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum | undefined,
-status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum | undefined,
-due_at: undefined | string | null,
-estimated_minutes: undefined | number | null,
-};
-}
-namespace Enums {
-export type TaskPriorityEnum = 'low' | 'medium' | 'high' | 'urgent';
-export type TaskStatusEnum = 'todo' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled';
-}
-}
-namespace Templates {
-namespace Data {
-export type ProjectTemplateSummaryData = {
-id: string,
-name: string,
-department_id: string | null,
-department_name: string | null,
-description: string | null,
-is_active: boolean,
-default_stages: Record<string, any>[],
-tasks_count: number,
-created_at: string,
-updated_at: string,
-};
-}
-namespace Enums {
-export type TemplateAssigneeRoleHintEnum = 'pm' | 'am' | 'support' | 'it';
+export type ActivityTypeEnum = 'note_created' | 'lead_created' | 'lead_converted' | 'deal_created' | 'stage_changed' | 'field_updated';
 }
 }
 }

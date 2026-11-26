@@ -10,6 +10,18 @@ defineOptions({
     layout: () => null,
 });
 
+const props = withDefaults(
+    defineProps<{
+        demoSuperadmin?: {
+            email: string;
+            password: string;
+        } | null;
+    }>(),
+    {
+        demoSuperadmin: null,
+    },
+);
+
 const formRef = ref<HTMLFormElement | null>(null);
 const showPassword = ref(false);
 
@@ -20,6 +32,15 @@ const form = useForm({
 });
 
 useAccessibleFormValidation(formRef);
+
+function fillDemoSuperadmin(): void {
+    if (!props.demoSuperadmin) {
+        return;
+    }
+
+    form.email = props.demoSuperadmin.email;
+    form.password = props.demoSuperadmin.password;
+}
 
 const topLevelError = computed<string | null>(() => {
     const emailErr = form.errors.email;
@@ -168,6 +189,34 @@ function submit(): void {
                     Sign In
                 </Button>
             </form>
+
+            <div
+                v-if="demoSuperadmin"
+                data-testid="dev-superadmin-credentials"
+                class="mt-4 rounded-[6px] border border-default bg-subtle p-3 text-[12px]"
+            >
+                <div class="flex items-center justify-between gap-2">
+                    <span class="font-medium text-primary">Local Superadmin</span>
+                    <button
+                        type="button"
+                        data-testid="fill-superadmin-credentials"
+                        class="text-[11px] font-medium text-accent-primary hover:text-accent-hover cursor-pointer"
+                        @click="fillDemoSuperadmin"
+                    >
+                        Fill credentials
+                    </button>
+                </div>
+                <dl class="mt-2 space-y-1">
+                    <div class="flex items-center justify-between gap-2">
+                        <dt class="text-secondary">Email</dt>
+                        <dd class="font-mono text-primary select-all">{{ demoSuperadmin.email }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                        <dt class="text-secondary">Password</dt>
+                        <dd class="font-mono text-primary select-all">{{ demoSuperadmin.password }}</dd>
+                    </div>
+                </dl>
+            </div>
 
             <div class="mt-5 flex items-start gap-2 border-t border-default pt-4 text-[12px] leading-4 text-muted">
                 <LockKeyhole class="mt-0.5 h-3.5 w-3.5 shrink-0 text-secondary" :stroke-width="1.75" aria-hidden="true" />

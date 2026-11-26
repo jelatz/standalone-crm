@@ -23,6 +23,7 @@ class CreateDealData extends Data
         public int $amount_cents = 0,
         public string $currency = 'USD',
         public ?string $expected_close_date = null,
+        public ?int $win_probability = null,
         public ?string $lost_reason = null,
         public array $custom_fields = [],
         #[DataCollectionOf(DealStakeholderInputData::class)]
@@ -44,6 +45,7 @@ class CreateDealData extends Data
             'amount_cents' => ['sometimes', 'integer', 'min:0', 'max:999999999999999'],
             'currency' => ['sometimes', 'string', 'size:3'],
             'expected_close_date' => ['nullable', 'date_format:Y-m-d'],
+            'win_probability' => ['nullable', 'integer', 'min:0', 'max:100'],
             'lost_reason' => ['nullable', 'string', 'max:255'],
             'custom_fields' => ['sometimes', 'array'],
             'stakeholders' => ['sometimes', 'nullable', 'array'],

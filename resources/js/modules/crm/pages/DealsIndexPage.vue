@@ -44,7 +44,6 @@ const props = defineProps<{
     filterDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
     customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
     assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[];
-    assignableAms?: App.Modules.Core.Users.Data.UserSummaryData[];
     companies: Array<{
         id: string;
         name: string;
@@ -58,7 +57,6 @@ const props = defineProps<{
     }>;
     can: {
         create: boolean;
-        submitHandoff?: boolean;
     };
 }>();
 
@@ -71,11 +69,6 @@ const canMoveDeals = computed(() =>
 );
 const canOverrideGates = computed(() =>
     activeUser.value ? activeUser.value.permissions.includes('deals.override_gates') : false,
-);
-const canSubmitHandoff = computed(
-    () =>
-        props.can.submitHandoff ??
-        (activeUser.value ? activeUser.value.permissions.includes('handoffs.submit') : false),
 );
 
 const instanceId = useId();
@@ -330,6 +323,7 @@ const createForm = ref({
     amount_dollars: '',
     currency: 'USD',
     expected_close_date: '',
+    win_probability: '',
     custom_fields: {} as Record<string, any>,
 });
 
@@ -365,6 +359,7 @@ function openCreateModal(): void {
         amount_dollars: '',
         currency: 'USD',
         expected_close_date: '',
+        win_probability: '',
         custom_fields: {},
     };
     createOpen.value = true;
@@ -397,6 +392,12 @@ async function handleCreateSubmit(): Promise<void> {
         }
     }
 
+    const rawProbability = String(createForm.value.win_probability ?? '').trim();
+    const winProbability =
+        rawProbability !== '' && Number.isFinite(Number(rawProbability))
+            ? Math.round(Number(rawProbability))
+            : null;
+
     try {
         const created = await crmApi.createDeal({
             company_id: createForm.value.company_id,
@@ -408,6 +409,7 @@ async function handleCreateSubmit(): Promise<void> {
             amount_cents: amountCents,
             currency: createForm.value.currency.trim().toUpperCase() || 'USD',
             expected_close_date: createForm.value.expected_close_date || null,
+            win_probability: winProbability,
             lost_reason: null,
             custom_fields: cleanCustom,
             stakeholders: null,
@@ -641,11 +643,9 @@ async function handleCreateSubmit(): Promise<void> {
             :board="props.board"
             :custom-field-definitions="props.customFieldDefinitions"
             :assignable-users="props.assignableUsers"
-            :assignable-ams="props.assignableAms ?? props.assignableUsers"
             :contacts="props.contacts"
             :can-move-deals="canMoveDeals"
             :can-override-gates="canOverrideGates"
-            :can-submit-handoff="canSubmitHandoff"
         />
 
         <!-- Table View -->
@@ -843,7 +843,22 @@ async function handleCreateSubmit(): Promise<void> {
                         />
                     </div>
 
-                    <div class="sm:col-span-2">
+                    <div>
+                        <label :for="`create-deal-prob-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
+                            Win Probability (%)
+                        </label>
+                        <Input
+                            :id="`create-deal-prob-${instanceId}`"
+                            v-model="createForm.win_probability"
+                            type="number"
+                            placeholder="Stage default"
+                            class="font-mono tabular-nums"
+                            :disabled="createSubmitting"
+                            :error-message="createFieldErrors.win_probability ?? ''"
+                        />
+                    </div>
+
+                    <div>
                         <label :for="`create-deal-am-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
                             Account Manager
                         </label>

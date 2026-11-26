@@ -110,6 +110,10 @@ export const crmHttpClient = httpClient;
 
 httpClient.interceptors.request.use((config) => {
     if (config.headers) {
+        if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+            config.headers['Content-Type'] = 'multipart/form-data';
+        }
+
         const xsrfToken = readXsrfCookieToken();
         if (xsrfToken) {
             config.headers['X-XSRF-TOKEN'] = xsrfToken;
@@ -229,13 +233,73 @@ async function requestData<T>(fn: () => Promise<{ data: T }>): Promise<T> {
 }
 
 export interface TimelineQueryParams {
-    linkable_type: 'company' | 'contact' | 'deal' | 'project';
+    linkable_type: 'lead' | 'company' | 'contact' | 'deal';
     linkable_id: string;
     cursor?: string | null;
     limit?: number;
 }
 
+export const leadImportTemplateUrl = '/api/internal/crm/leads/import/template';
+
 export const crmApi = {
+    // Leads
+    createLead(payload: App.Modules.Crm.Leads.Data.UpsertLeadData) {
+        return requestData<App.Modules.Crm.Leads.Data.LeadDetailData>(() =>
+            httpClient.post('/api/internal/crm/leads', payload),
+        );
+    },
+    previewLeadImport(
+        file: File,
+        columnMapping?: Record<string, string | null>,
+        signal?: AbortSignal,
+    ) {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (columnMapping && Object.keys(columnMapping).length > 0) {
+            formData.append('column_mapping', JSON.stringify(columnMapping));
+        }
+
+        return requestData<App.Modules.Crm.Leads.Data.ImportLeadsPreviewData>(() =>
+            httpClient.post('/api/internal/crm/leads/import/preview', formData, { signal }),
+        );
+    },
+    commitLeadImport(rows: App.Modules.Crm.Leads.Data.ImportLeadRowPayloadData[]) {
+        return requestData<App.Modules.Crm.Leads.Data.ImportLeadsResultData>(() =>
+            httpClient.post('/api/internal/crm/leads/import/commit', { rows }),
+        );
+    },
+    updateLead(
+        leadId: string,
+        payload: UndefinedAsOptional<App.Modules.Crm.Leads.Data.UpsertLeadData>,
+    ) {
+        return requestData<App.Modules.Crm.Leads.Data.LeadDetailData>(() =>
+            httpClient.patch(`/api/internal/crm/leads/${leadId}`, payload),
+        );
+    },
+    deleteLead(leadId: string) {
+        return requestData<{ deleted: boolean }>(() =>
+            httpClient.delete(`/api/internal/crm/leads/${leadId}`),
+        );
+    },
+    convertLead(
+        leadId: string,
+        payload: App.Modules.Crm.Leads.Data.ConvertLeadData,
+    ) {
+        return requestData<App.Modules.Crm.Leads.Data.ConvertLeadResultData>(() =>
+            httpClient.post(`/api/internal/crm/leads/${leadId}/convert`, payload),
+        );
+    },
+    grantLeadCollaborator(leadId: string, payload: App.Modules.Core.Rbac.Data.GrantCollaboratorData) {
+        return requestData<App.Modules.Core.Rbac.Data.EntityCollaboratorData>(() =>
+            httpClient.post(`/api/internal/crm/leads/${leadId}/collaborators`, payload),
+        );
+    },
+    revokeLeadCollaborator(leadId: string, userId: string) {
+        return requestData<{ revoked: boolean }>(() =>
+            httpClient.delete(`/api/internal/crm/leads/${leadId}/collaborators/${userId}`),
+        );
+    },
+
     // Companies
     createCompany(payload: App.Modules.Crm.Companies.Data.UpsertCompanyData) {
         return requestData<App.Modules.Crm.Companies.Data.CompanyDetailData>(() =>
@@ -338,10 +402,13 @@ export const crmApi = {
 
     // Collaborators generic helper
     grantCollaborator(
-        entityType: 'company' | 'contact' | 'deal',
+        entityType: 'lead' | 'company' | 'contact' | 'deal',
         entityId: string,
         payload: App.Modules.Core.Rbac.Data.GrantCollaboratorData,
     ) {
+        if (entityType === 'lead') {
+            return crmApi.grantLeadCollaborator(entityId, payload);
+        }
         if (entityType === 'company') {
             return crmApi.grantCompanyCollaborator(entityId, payload);
         }
@@ -351,10 +418,13 @@ export const crmApi = {
         return crmApi.grantDealCollaborator(entityId, payload);
     },
     revokeCollaborator(
-        entityType: 'company' | 'contact' | 'deal',
+        entityType: 'lead' | 'company' | 'contact' | 'deal',
         entityId: string,
         userId: string,
     ) {
+        if (entityType === 'lead') {
+            return crmApi.revokeLeadCollaborator(entityId, userId);
+        }
         if (entityType === 'company') {
             return crmApi.revokeCompanyCollaborator(entityId, userId);
         }

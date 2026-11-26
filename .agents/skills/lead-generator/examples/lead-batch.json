@@ -1,0 +1,26 @@
+[
+  {
+    "first_name": "Hannah",
+    "last_name": "Park",
+    "email": "hannah.park@apexfreight.example",
+    "phone": "+1-312-555-0184",
+    "job_title": "VP of Supply Chain",
+    "company_name": "Apex Freight Systems",
+    "website": "https://apexfreight.example",
+    "source": "outbound",
+    "estimated_value_cents": 3600000,
+    "currency": "USD"
+  },
+  {
+    "first_name": "Mateo",
+    "last_name": "Silva",
+    "email": "msilva@gridpulse.example",
+    "phone": "+1-512-555-0149",
+    "job_title": "Head of Operations",
+    "company_name": "GridPulse Energy",
+    "website": "https://gridpulse.example",
+    "source": "referral",
+    "estimated_value_cents": 5400000,
+    "currency": "USD"
+  }
+]

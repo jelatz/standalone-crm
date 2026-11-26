@@ -170,6 +170,7 @@ class CreateDealAction
                 'amount_cents' => $data->amount_cents,
                 'currency' => strtoupper(trim($data->currency)),
                 'expected_close_date' => $expectedCloseDate,
+                'win_probability' => $data->win_probability,
                 'stage_entered_at' => $now,
                 'won_at' => $wonAt,
                 'lost_at' => $lostAt,

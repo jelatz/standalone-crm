@@ -50,6 +50,7 @@ class Deal extends Model
         'amount_cents',
         'currency',
         'expected_close_date',
+        'win_probability',
         'stage_entered_at',
         'won_at',
         'lost_at',
@@ -72,6 +73,7 @@ class Deal extends Model
         return [
             'amount_cents' => 'integer',
             'expected_close_date' => 'date',
+            'win_probability' => 'integer',
             'stage_entered_at' => 'immutable_datetime',
             'won_at' => 'immutable_datetime',
             'lost_at' => 'immutable_datetime',

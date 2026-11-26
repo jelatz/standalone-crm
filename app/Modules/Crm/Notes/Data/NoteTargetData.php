@@ -24,7 +24,7 @@ class NoteTargetData extends Data
     public static function rules(): array
     {
         return [
-            'linkable_type' => ['required', 'string', Rule::in(['company', 'contact', 'deal'])],
+            'linkable_type' => ['required', 'string', Rule::in(['lead', 'company', 'contact', 'deal'])],
             'linkable_id' => ['required', 'uuid'],
         ];
     }

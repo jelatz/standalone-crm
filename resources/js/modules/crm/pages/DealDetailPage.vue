@@ -6,9 +6,7 @@ import {
     AlertTriangle,
     CheckCircle2,
     ChevronRight,
-    ClipboardCheck,
     Download,
-    FolderKanban,
     Paperclip,
     Plus,
     RefreshCw,
@@ -25,13 +23,6 @@ import ActivityTimeline from '@/modules/crm/components/ActivityTimeline.vue';
 import CollaboratorsPanel from '@/modules/crm/components/CollaboratorsPanel.vue';
 import CustomFieldsForm from '@/modules/crm/components/CustomFieldsForm.vue';
 import StageGateModal, { type StageGateSubmitPayload } from '@/modules/crm/components/StageGateModal.vue';
-import HandoffSubmitDrawer from '@/modules/projects/components/HandoffSubmitDrawer.vue';
-import {
-    handoffStatusLabel,
-    handoffStatusVariant,
-    toHandoffSummaryFromDetail,
-} from '@/modules/projects/utils/projectFormatters';
-import { useAuthStore } from '@/stores/auth.store';
 import {
     crmApi,
     extractFirstFieldErrors,
@@ -66,8 +57,6 @@ const props = defineProps<{
     customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
     timeline: App.Modules.Crm.Timeline.Data.TimelinePageData;
     assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[];
-    assignableAms?: App.Modules.Core.Users.Data.UserSummaryData[];
-    activeHandoff?: App.Modules.Projects.Handoffs.Data.DealHandoffSummaryData | null;
     companies: Array<{
         id: string;
         name: string;
@@ -88,31 +77,14 @@ const props = defineProps<{
         moveStage: boolean;
         overrideGates: boolean;
         manageCollaborators: boolean;
-        submitHandoff?: boolean;
     };
 }>();
 
-const authStore = useAuthStore();
 const instanceId = useId();
 const localDeal = ref<App.Modules.Crm.Deals.Data.DealDetailData>({
     ...props.deal,
     custom_fields: { ...(props.deal.custom_fields ?? {}) },
 });
-const localActiveHandoff = ref<App.Modules.Projects.Handoffs.Data.DealHandoffSummaryData | null>(
-    props.activeHandoff ?? null,
-);
-const handoffDrawerOpen = ref<boolean>(false);
-
-const canSubmitHandoff = computed(
-    () =>
-        props.can.submitHandoff ??
-        (authStore.hasPermission('handoffs.submit') && props.can.update),
-);
-const effectiveAssignableAms = computed(() =>
-    props.assignableAms && props.assignableAms.length > 0
-        ? props.assignableAms
-        : props.assignableUsers,
-);
 const localStakeholders = ref<App.Modules.Crm.Deals.Data.DealStakeholderData[]>([
     ...props.stakeholders,
 ]);
@@ -125,6 +97,9 @@ const form = ref({
     amount_dollars: String((localDeal.value.amount_cents / 100).toFixed(2).replace(/\.00$/, '')),
     currency: localDeal.value.currency || 'USD',
     expected_close_date: localDeal.value.expected_close_date ?? '',
+    win_probability: localDeal.value.win_probability !== null && localDeal.value.win_probability !== undefined
+        ? String(localDeal.value.win_probability)
+        : '',
     lost_reason: localDeal.value.lost_reason ?? '',
     custom_fields: { ...(localDeal.value.custom_fields ?? {}) } as Record<string, any>,
 });
@@ -177,6 +152,9 @@ function syncLocalFromDeal(updated: App.Modules.Crm.Deals.Data.DealDetailData): 
         amount_dollars: String((updated.amount_cents / 100).toFixed(2).replace(/\.00$/, '')),
         currency: updated.currency || 'USD',
         expected_close_date: updated.expected_close_date ?? '',
+        win_probability: updated.win_probability !== null && updated.win_probability !== undefined
+            ? String(updated.win_probability)
+            : '',
         lost_reason: updated.lost_reason ?? '',
         custom_fields: { ...(updated.custom_fields ?? {}) },
     };
@@ -195,21 +173,6 @@ watch(
     },
     { deep: true },
 );
-
-watch(
-    () => props.activeHandoff,
-    (next) => {
-        localActiveHandoff.value = next ?? null;
-    },
-    { deep: true },
-);
-
-function handleHandoffSubmitted(
-    handoff: App.Modules.Projects.Handoffs.Data.DealHandoffDetailData,
-): void {
-    localActiveHandoff.value = toHandoffSummaryFromDetail(handoff);
-    saveSuccess.value = 'Deal handoff submitted for operations review.';
-}
 
 async function handleSaveProperties(): Promise<void> {
     if (!props.can.update || saving.value) {
@@ -239,6 +202,12 @@ async function handleSaveProperties(): Promise<void> {
         !localDeal.value.has_masked_primary_contact &&
         form.value.primary_contact_id !== initialPrimaryContactId;
 
+    const rawProbability = String(form.value.win_probability ?? '').trim();
+    const parsedProbability =
+        rawProbability !== '' && Number.isFinite(Number(rawProbability))
+            ? Math.round(Number(rawProbability))
+            : null;
+
     try {
         const updated = await crmApi.updateDeal(localDeal.value.id, {
             expected_version: localDeal.value.version,
@@ -251,6 +220,7 @@ async function handleSaveProperties(): Promise<void> {
             amount_cents: amountCents,
             currency: form.value.currency.trim().toUpperCase() || 'USD',
             expected_close_date: form.value.expected_close_date || null,
+            win_probability: parsedProbability,
             lost_reason: form.value.lost_reason.trim() || null,
             custom_fields: form.value.custom_fields,
             override_gates: false,
@@ -301,7 +271,6 @@ async function handleStageMove(targetStageId: string): Promise<void> {
     saveError.value = '';
     saveSuccess.value = '';
     conflictError.value = '';
-    const previousStageType = localDeal.value.stage_type;
 
     try {
         const updated = await crmApi.moveDealStage(localDeal.value.id, {
@@ -316,14 +285,6 @@ async function handleStageMove(targetStageId: string): Promise<void> {
 
         syncLocalFromDeal(updated);
         saveSuccess.value = `Moved to ${updated.stage_name ?? targetStage.name} (v${updated.version}).`;
-        if (
-            previousStageType !== 'won'
-            && updated.stage_type === 'won'
-            && !localActiveHandoff.value
-            && canSubmitHandoff.value
-        ) {
-            handoffDrawerOpen.value = true;
-        }
     } catch (error) {
         if (error instanceof OptimisticLockConflictError) {
             conflictError.value = error.message;
@@ -353,7 +314,6 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
     gateSubmitting.value = true;
     state.errors = {};
     state.errorMessage = '';
-    const previousStageType = localDeal.value.stage_type;
 
     try {
         const updated = await crmApi.moveDealStage(localDeal.value.id, {
@@ -369,14 +329,6 @@ async function handleGateSubmit(payload: StageGateSubmitPayload): Promise<void> 
         syncLocalFromDeal(updated);
         gateModalState.value = null;
         saveSuccess.value = `Updated & moved to ${updated.stage_name ?? state.targetStage.name} (v${updated.version}).`;
-        if (
-            previousStageType !== 'won'
-            && updated.stage_type === 'won'
-            && !localActiveHandoff.value
-            && canSubmitHandoff.value
-        ) {
-            handoffDrawerOpen.value = true;
-        }
     } catch (error) {
         if (error instanceof StageGateValidationError) {
             state.missingCoreFields = error.missingCoreFields;
@@ -545,48 +497,8 @@ async function handleDeleteDeal(): Promise<void> {
                 </div>
             </div>
 
-            <!-- Quick Stage Controls, Handoff Hook & Delete -->
+            <!-- Quick Stage Controls & Delete -->
             <div class="flex flex-wrap shrink-0 items-center gap-2">
-                <!-- Active Handoff Pill or Submit Handoff CTA on Won Deals -->
-                <template v-if="localDeal.stage_type === 'won'">
-                    <div
-                        v-if="localActiveHandoff"
-                        data-testid="deal-active-handoff-chip"
-                        class="inline-flex items-center gap-1.5 rounded-[6px] border border-default bg-subtle px-2.5 py-1 text-[12px]"
-                    >
-                        <Badge :variant="handoffStatusVariant(localActiveHandoff.status)">
-                            {{ handoffStatusLabel(localActiveHandoff.status) }}
-                        </Badge>
-                        <Link
-                            :href="`/app/projects/handoffs/${localActiveHandoff.id}`"
-                            data-testid="deal-active-handoff-link"
-                            class="inline-flex items-center gap-1 font-medium text-accent-primary hover:underline"
-                        >
-                            <ClipboardCheck class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
-                            <span>View Handoff</span>
-                        </Link>
-                        <Link
-                            v-if="localActiveHandoff.provisioned_project"
-                            :href="`/app/projects/${localActiveHandoff.provisioned_project.id}`"
-                            data-testid="deal-provisioned-project-link"
-                            class="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-status-success hover:underline"
-                        >
-                            <FolderKanban class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
-                            <span>{{ localActiveHandoff.provisioned_project.code }}</span>
-                        </Link>
-                    </div>
-
-                    <Button
-                        v-else-if="canSubmitHandoff"
-                        variant="primary"
-                        size="sm"
-                        data-testid="deal-submit-handoff-cta"
-                        @click="handoffDrawerOpen = true"
-                    >
-                        <ClipboardCheck class="h-3.5 w-3.5" :stroke-width="1.75" aria-hidden="true" />
-                        <span>Submit handoff</span>
-                    </Button>
-                </template>
                 <div v-if="props.can.moveStage" class="flex flex-wrap items-center gap-2">
                     <label :for="`deal-quick-stage-${instanceId}`" class="sr-only">
                         Move deal stage
@@ -671,14 +583,14 @@ async function handleDeleteDeal(): Promise<void> {
             </Button>
         </div>
 
-        <!-- 3-Pane Workspace Matching Stitch Screen c624b7c5799d41d5b8e5e2e0d13f5b46 -->
+        <!-- 3-Pane CRM Detail View -->
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
             <!-- Left 280px Pane: Deal Properties + Typed Custom Fields -->
             <aside aria-label="Deal properties" class="w-full shrink-0 rounded-[8px] border border-default bg-surface p-3.5 space-y-3 lg:w-[280px]">
                 <div class="flex items-center justify-between border-b border-default pb-2">
                     <h3 class="text-[13px] font-semibold text-primary">Deal Properties</h3>
                     <span class="font-mono text-[11px] tabular-nums text-muted">
-                        {{ localDeal.stage_win_probability ?? 0 }}% prob
+                        {{ localDeal.effective_win_probability ?? localDeal.stage_win_probability ?? 0 }}% prob
                     </span>
                 </div>
 
@@ -850,6 +762,21 @@ async function handleDeleteDeal(): Promise<void> {
                             class="font-mono tabular-nums"
                             :disabled="!props.can.update || saving"
                             :error-message="fieldErrors.expected_close_date ?? ''"
+                        />
+                    </div>
+
+                    <div>
+                        <label :for="`deal-win-prob-${instanceId}`" class="mb-1 block text-[12px] font-medium text-secondary">
+                            Win Probability (%)
+                        </label>
+                        <Input
+                            :id="`deal-win-prob-${instanceId}`"
+                            v-model="form.win_probability"
+                            type="number"
+                            :placeholder="`Stage default (${localDeal.stage_win_probability ?? 0}%)`"
+                            class="font-mono tabular-nums"
+                            :disabled="!props.can.update || saving"
+                            :error-message="fieldErrors.win_probability ?? ''"
                         />
                     </div>
 
@@ -1172,21 +1099,5 @@ async function handleDeleteDeal(): Promise<void> {
                 </div>
             </div>
         </Dialog>
-
-        <!-- Won Deal Handoff Submit Drawer -->
-        <HandoffSubmitDrawer
-            :open="handoffDrawerOpen"
-            :deal="{
-                id: localDeal.id,
-                title: localDeal.title,
-                amount_cents: localDeal.amount_cents,
-                currency: localDeal.currency,
-                company_name: localDeal.company_name,
-                account_manager_id: localDeal.account_manager_id,
-            }"
-            :assignable-ams="effectiveAssignableAms"
-            @update:open="handoffDrawerOpen = $event"
-            @submitted="handleHandoffSubmitted"
-        />
     </div>
 </template>

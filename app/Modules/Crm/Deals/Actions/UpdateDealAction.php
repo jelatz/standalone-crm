@@ -179,6 +179,11 @@ class UpdateDealAction
                 }
             }
 
+            if (! $data->win_probability instanceof Optional && $data->win_probability !== $lockedDeal->win_probability) {
+                $attributes['win_probability'] = $data->win_probability;
+                $changedFields[] = 'win_probability';
+            }
+
             $nextLostReason = $lockedDeal->lost_reason;
             if (! $data->lost_reason instanceof Optional) {
                 $candidateReason = $data->lost_reason !== null && trim($data->lost_reason) !== ''

@@ -15,7 +15,16 @@ class AuthController extends Controller
 {
     public function showLogin(): InertiaResponse
     {
-        return Inertia::render('core/pages/LoginPage');
+        $demoSuperadmin = app()->environment('local')
+            ? [
+                'email' => mb_strtolower(trim((string) config('auth.seed_superadmin.email', 'superadmin@example.com'))),
+                'password' => (string) config('auth.seed_superadmin.password', 'SuperAdmin123!'),
+            ]
+            : null;
+
+        return Inertia::render('core/pages/LoginPage', [
+            'demoSuperadmin' => $demoSuperadmin,
+        ]);
     }
 
     public function login(

@@ -95,7 +95,7 @@ class ListDealsAction
             ->with([
                 'company:id,name',
                 'primaryContact:id,first_name,last_name,full_name',
-                'stage:id,name,stage_type,rotting_days',
+                'stage:id,name,stage_type,win_probability,rotting_days',
                 'owner:id,name',
                 'accountManager:id,name',
             ])
@@ -158,7 +158,7 @@ class ListDealsAction
             ->with([
                 'company:id,name',
                 'primaryContact:id,first_name,last_name,full_name',
-                'stage:id,name,stage_type,rotting_days',
+                'stage:id,name,stage_type,win_probability,rotting_days',
                 'owner:id,name',
                 'accountManager:id,name',
             ])

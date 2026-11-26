@@ -3,7 +3,7 @@ import { createApp, h, type DefineComponent } from 'vue';
 import { createInertiaApp } from '@inertiajs/vue3';
 import { createPinia } from 'pinia';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
-import WorkspaceShellLayout from './layouts/WorkspaceShellLayout.vue';
+import CrmShellLayout from './layouts/CrmShellLayout.vue';
 
 type InertiaPageComponent = DefineComponent & {
     layout?: unknown;
@@ -28,7 +28,7 @@ createInertiaApp({
             name !== 'core/pages/LoginPage' &&
             (name.startsWith('core/pages/') || name.includes('/pages/'))
         ) {
-            page.default.layout = WorkspaceShellLayout;
+            page.default.layout = CrmShellLayout;
         }
 
         return page.default;

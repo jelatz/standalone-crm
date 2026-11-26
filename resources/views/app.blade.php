@@ -14,16 +14,15 @@
         <script>
             (() => {
                 try {
-                    if (localStorage.getItem('workspace-theme') === 'dark') {
+                    const theme = localStorage.getItem('crm-theme') ?? localStorage.getItem('workspace-theme');
+                    if (theme === 'dark') {
                         document.documentElement.classList.add('dark');
                     }
                 } catch {}
             })();
         </script>
 
-        @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
-            @vite(['resources/css/app.css', 'resources/js/app.ts'])
-        @endif
+        @vite(['resources/css/app.css', 'resources/js/app.ts'])
 
         @inertiaHead
     </head>

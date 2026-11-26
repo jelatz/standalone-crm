@@ -85,9 +85,9 @@ class CreateNoteAction
             $type = $target instanceof NoteTargetData ? $target->linkable_type : (string) ($target['linkable_type'] ?? '');
             $id = $target instanceof NoteTargetData ? $target->linkable_id : (string) ($target['linkable_id'] ?? '');
 
-            if (! in_array($type, ['company', 'contact', 'deal'], true) || ! Str::isUuid($id)) {
+            if (! in_array($type, ['lead', 'company', 'contact', 'deal'], true) || ! Str::isUuid($id)) {
                 throw ValidationException::withMessages([
-                    'targets' => ['All note targets must reference valid company, contact, or deal UUIDs.'],
+                    'targets' => ['All note targets must reference valid lead, company, contact, or deal UUIDs.'],
                 ]);
             }
 

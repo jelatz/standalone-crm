@@ -12,9 +12,7 @@ import {
     type RealtimeEchoClient,
 } from '@/echo';
 import { useAuthStore } from '@/stores/auth.store';
-import { useDraftsStore } from '@/stores/drafts.store';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { useUnreadsStore } from '@/stores/unreads.store';
 
 interface MockPageState {
     url: string;
@@ -31,10 +29,10 @@ interface MockPageState {
     };
 }
 
-const { mockPage, mockRouterVisit, mockRouterPost } = vi.hoisted(() => {
+const { mockPage, mockRouterVisit, mockRouterPost, mockFormStateRef } = vi.hoisted(() => {
     const page: MockPageState = {
         url: '/app',
-        component: 'core/pages/WorkspaceHomePage',
+        component: 'crm/pages/CrmOverviewPage',
         props: {
             auth: {
                 user: null,
@@ -47,6 +45,7 @@ const { mockPage, mockRouterVisit, mockRouterPost } = vi.hoisted(() => {
         mockPage: page,
         mockRouterVisit: vi.fn(),
         mockRouterPost: vi.fn(),
+        mockFormStateRef: { current: null as null | { errors: Record<string, string> } },
     };
 });
 
@@ -101,20 +100,23 @@ vi.mock('@inertiajs/vue3', async () => {
                 },
             });
 
-            return formState;
+            return (() => {
+                mockFormStateRef.current = formState;
+                return formState;
+            })();
         },
         router: {
             visit: mockRouterVisit,
             post: mockRouterPost,
+            reload: vi.fn(),
         },
     };
 });
 
-import WorkspaceShellLayout from '@/layouts/WorkspaceShellLayout.vue';
+import CrmShellLayout from '@/layouts/CrmShellLayout.vue';
 import LoginPage from '@/modules/core/pages/LoginPage.vue';
-import ModulePlaceholderPage from '@/modules/core/pages/ModulePlaceholderPage.vue';
 import UsersPage from '@/modules/core/pages/UsersPage.vue';
-import WorkspaceHomePage from '@/modules/core/pages/WorkspaceHomePage.vue';
+import CrmOverviewPage from '@/modules/crm/pages/CrmOverviewPage.vue';
 
 function makeUser(): App.Modules.Core.Auth.Data.AuthenticatedUserData {
     return {
@@ -122,10 +124,112 @@ function makeUser(): App.Modules.Core.Auth.Data.AuthenticatedUserData {
         name: 'Jordan Mercer',
         email: 'jordan.mercer@company.internal',
         employee_code: 'EMP-0142',
-        job_title: 'Operations Lead',
-        department_id: 'dept-ops',
-        roles: ['operations_manager'],
-        permissions: ['handoffs.view', 'handoffs.review', 'projects.view'],
+        job_title: 'Sales Director',
+        department_id: 'dept-sales',
+        roles: ['director'],
+        permissions: [
+            'leads.view',
+            'leads.create',
+            'leads.convert',
+            'contacts.view',
+            'companies.view',
+            'deals.view',
+        ],
+    };
+}
+
+function makeOverviewData(
+    overrides: Partial<App.Modules.Crm.Overview.Data.CrmOverviewData> = {},
+): App.Modules.Crm.Overview.Data.CrmOverviewData {
+    return {
+        open_leads_count: 14,
+        qualified_leads_count: 5,
+        open_pipeline_cents: 142850000,
+        open_deals_count: 8,
+        weighted_forecast_cents: 76400000,
+        won_this_month_cents: 28000000,
+        won_this_month_count: 2,
+        companies_count: 22,
+        contacts_count: 48,
+        pipeline_name: 'New Business',
+        stage_breakdown: [
+            {
+                stage_id: 'stg-1',
+                stage_name: 'Discovery',
+                stage_type: 'open',
+                win_probability: 25,
+                deals_count: 4,
+                total_amount_cents: 62000000,
+                weighted_amount_cents: 15500000,
+            },
+            {
+                stage_id: 'stg-2',
+                stage_name: 'Proposal',
+                stage_type: 'open',
+                win_probability: 50,
+                deals_count: 4,
+                total_amount_cents: 80850000,
+                weighted_amount_cents: 60900000,
+            },
+        ],
+        recent_leads: [
+            {
+                id: 'lead-101',
+                owner_id: 'usr-100',
+                owner_name: 'Jordan Mercer',
+                first_name: 'Elena',
+                last_name: 'Vance',
+                full_name: 'Elena Vance',
+                email: 'elena@northwind.io',
+                phone: '+1-415-555-0100',
+                job_title: 'VP Operations',
+                company_name: 'Northwind Logistics',
+                website: 'https://northwind.io',
+                status: 'qualified',
+                source: 'inbound_web',
+                estimated_value_cents: 4500000,
+                currency: 'USD',
+                converted_at: null,
+                converted_company_id: null,
+                converted_contact_id: null,
+                converted_deal_id: null,
+                custom_fields: {},
+                created_at: '2026-11-20T10:00:00Z',
+                updated_at: '2026-11-25T10:00:00Z',
+            },
+        ],
+        closing_soon_deals: [
+            {
+                id: 'deal-101',
+                company_id: 'comp-101',
+                company_name: 'Northwind Logistics',
+                primary_contact_id: 'cont-101',
+                primary_contact_name: 'Hannah Kowalski',
+                pipeline_id: 'pipe-1',
+                stage_id: 'stg-2',
+                stage_name: 'Proposal',
+                stage_type: 'open',
+                owner_id: 'usr-100',
+                owner_name: 'Jordan Mercer',
+                account_manager_id: null,
+                account_manager_name: null,
+                title: 'Northwind WMS Rollout',
+                amount_cents: 48000000,
+                currency: 'USD',
+                expected_close_date: '2026-12-10',
+                win_probability: 75,
+                effective_win_probability: 75,
+                stage_entered_at: '2026-11-15T10:00:00Z',
+                won_at: null,
+                lost_at: null,
+                board_position: 65536,
+                version: 1,
+                is_rotting: false,
+                custom_fields: {},
+                updated_at: '2026-11-25T10:00:00Z',
+            },
+        ],
+        ...overrides,
     };
 }
 
@@ -174,15 +278,16 @@ function createMockEcho(): {
     };
 }
 
-describe('WorkspaceShellLayout & Core Pages', () => {
+describe('CrmShellLayout & Core Pages', () => {
     let mountedWrappers: Array<{ unmount: () => void }> = [];
 
     beforeEach(() => {
         setActivePinia(createPinia());
         mockRouterVisit.mockReset();
         mockRouterPost.mockReset();
+        localStorage.clear();
         mockPage.url = '/app';
-        mockPage.component = 'core/pages/WorkspaceHomePage';
+        mockPage.component = 'crm/pages/CrmOverviewPage';
         mockPage.props = {
             auth: {
                 user: makeUser(),
@@ -201,17 +306,27 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         document.documentElement.classList.remove('dark');
     });
 
-    it('preserves open drafts and Echo subscription across simulated Inertia page swaps', async () => {
+    it('preserves Echo subscription across Inertia page swaps with zero Drafts tray or workspace nav links', async () => {
         const mockEcho = createMockEcho();
         setEchoInstanceForTesting(mockEcho.client);
 
-        const activeComponent = shallowRef<Component>(WorkspaceHomePage);
-        const activeProps = reactive<Record<string, unknown>>({});
+        const activeComponent = shallowRef<Component>(CrmOverviewPage);
+        const activeProps = reactive<Record<string, unknown>>({
+            overview: makeOverviewData(),
+            can: {
+                viewLeads: true,
+                createLead: true,
+                viewCompanies: true,
+                viewContacts: true,
+                viewDeals: true,
+                createDeal: true,
+            },
+        });
 
         const InertiaShellHost = defineComponent({
             setup() {
                 return () =>
-                    h(WorkspaceShellLayout, null, {
+                    h(CrmShellLayout, null, {
                         default: () => h(activeComponent.value, activeProps),
                     });
             },
@@ -224,8 +339,6 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         await nextTick();
 
         const realtimeStore = useRealtimeStore();
-        const draftsStore = useDraftsStore();
-        const unreadsStore = useUnreadsStore();
 
         expect(realtimeStore.status).toBe('connected');
         expect(realtimeStore.subscribedUserId).toBe('usr-100');
@@ -233,42 +346,23 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         expect(mockEcho.privateSpy).toHaveBeenCalledWith('user.usr-100');
         expect(wrapper.get('[data-testid="realtime-status-indicator"]').text()).toContain('Live');
 
-        // Start and edit a draft in the docked tray
-        await wrapper.get('[data-testid="topbar-new-draft"]').trigger('click');
-        const bodyInput = wrapper.get<HTMLTextAreaElement>('#docked-draft-body');
-        await bodyInput.setValue('Confirming Northwind Logistics warehouse cutover window.');
+        // Pure CRM rail and top bar must NOT expose legacy Drafts tray or Delivery/Messaging links
+        expect(wrapper.find('[data-testid="topbar-new-draft"]').exists()).toBe(false);
+        expect(wrapper.find('a[href="/app/projects"]').exists()).toBe(false);
+        expect(wrapper.find('a[href="/app/my-work"]').exists()).toBe(false);
+        expect(wrapper.find('a[href="/app/chat"]').exists()).toBe(false);
+        expect(wrapper.find('a[href="/app/email"]').exists()).toBe(false);
+        expect(wrapper.find('a[href="/app/crm/leads"]').exists()).toBe(true);
 
-        // Mutate unread counts and verify live rail badges
-        unreadsStore.setCounts({ handoffs: 3, chat: 5, sharedInbox: 2 });
-        await nextTick();
-        expect(wrapper.get('[data-testid="unread-badge-handoffs"]').text()).toBe('3');
-        expect(wrapper.get('[data-testid="unread-badge-chat"]').text()).toBe('5');
-        expect(wrapper.get('[data-testid="unread-badge-sharedInbox"]').text()).toBe('2');
-
-        // Simulate Inertia navigation from /app -> /app/crm/companies
-        mockPage.url = '/app/crm/companies';
-        mockPage.component = 'core/pages/ModulePlaceholderPage';
-        mockPage.props.moduleTitle = 'Companies';
-        activeComponent.value = ModulePlaceholderPage;
+        // Simulate Inertia navigation from /app -> /app/crm/leads (using mounted slot swap)
+        mockPage.url = '/app/crm/leads';
+        mockPage.component = 'crm/pages/CrmOverviewPage';
         Object.assign(activeProps, {
-            moduleKey: 'crm.companies',
-            moduleTitle: 'Companies',
-            moduleDescription: 'Silo-scoped enterprise accounts and metadata.',
-            phaseLabel: 'Phase 1',
+            overview: makeOverviewData({ open_leads_count: 19 }),
         });
         await nextTick();
 
-        expect(wrapper.text()).toContain('Companies');
-        expect(wrapper.text()).toContain('Route key: crm.companies');
-
-        // Draft edits and Echo subscription survive untouched across page swap
-        expect(draftsStore.draftCount).toBe(1);
-        expect(draftsStore.activeDraft?.bodyText).toBe(
-            'Confirming Northwind Logistics warehouse cutover window.',
-        );
-        expect(wrapper.get<HTMLTextAreaElement>('#docked-draft-body').element.value).toBe(
-            'Confirming Northwind Logistics warehouse cutover window.',
-        );
+        expect(wrapper.text()).toContain('19');
         expect(mockEcho.privateSpy).toHaveBeenCalledTimes(1);
         expect(mockEcho.leaveSpy).not.toHaveBeenCalled();
 
@@ -285,7 +379,7 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         const mockEcho = createMockEcho();
         setEchoInstanceForTesting(mockEcho.client);
 
-        const wrapper = mount(WorkspaceShellLayout, {
+        const wrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: {
                 default: () => h('div', 'Content'),
@@ -305,9 +399,7 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         const dialogEl = document.body.querySelector('[data-testid="command-palette-dialog"]');
         expect(dialogEl).not.toBeNull();
 
-        const searchInput = document.body.querySelector<HTMLInputElement>(
-            '#workspace-command-search',
-        );
+        const searchInput = document.body.querySelector<HTMLInputElement>('#crm-command-search');
         expect(searchInput).not.toBeNull();
         if (searchInput) {
             searchInput.value = 'unknown-module-xyz';
@@ -335,47 +427,74 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         expect(document.body.querySelector('[data-testid="command-palette-dialog"]')).not.toBeNull();
     });
 
-    it('renders WorkspaceHomePage operational overview plus loading, empty, and error states', async () => {
-        const readyWrapper = mount(WorkspaceHomePage, {
+    it('renders CrmOverviewPage KPI strip, recent leads, closing soon deals, and loading/empty/error states', async () => {
+        const defaultCan = {
+            viewLeads: true,
+            createLead: true,
+            viewCompanies: true,
+            viewContacts: true,
+            viewDeals: true,
+            createDeal: true,
+        };
+
+        const readyWrapper = mount(CrmOverviewPage, {
             attachTo: document.body,
+            props: {
+                overview: makeOverviewData(),
+                can: defaultCan,
+            },
         });
         mountedWrappers.push(readyWrapper);
 
-        expect(readyWrapper.text()).toContain('Active Pipeline');
-        expect(readyWrapper.text()).toContain('$1,428,500');
-        expect(readyWrapper.text()).toContain('Northwind Logistics');
-        expect(readyWrapper.text()).toContain('PRJ-2026-0042');
-
-        // Trigger empty filter state
-        const escalatedTab = readyWrapper
-            .findAll('[role="tab"]')
-            .find((tab) => tab.text() === 'Escalated');
-        expect(escalatedTab).toBeDefined();
-        await escalatedTab?.trigger('click');
-        expect(readyWrapper.get('[data-testid="overview-empty-state"]').text()).toContain(
-            'No items match this filter',
+        expect(readyWrapper.get('[data-testid="overview-kpi-strip"]').text()).toContain('$1,428,500');
+        expect(readyWrapper.get('[data-testid="overview-kpi-strip"]').text()).toContain('$764,000');
+        expect(readyWrapper.get('[data-testid="overview-recent-leads"]').text()).toContain('Elena Vance');
+        expect(readyWrapper.get('[data-testid="overview-closing-soon-deals"]').text()).toContain(
+            'Northwind WMS Rollout',
         );
 
-        // Loading state
-        const loadingWrapper = mount(WorkspaceHomePage, {
-            attachTo: document.body,
-            props: { initialState: 'loading' },
-        });
-        mountedWrappers.push(loadingWrapper);
-        expect(loadingWrapper.find('[data-testid="overview-loading-state"]').exists()).toBe(true);
-
-        // Error state
-        const errorWrapper = mount(WorkspaceHomePage, {
+        // Empty leads & deals state
+        const emptyWrapper = mount(CrmOverviewPage, {
             attachTo: document.body,
             props: {
+                overview: makeOverviewData({
+                    recent_leads: [],
+                    closing_soon_deals: [],
+                    stage_breakdown: [],
+                }),
+                can: defaultCan,
+            },
+        });
+        mountedWrappers.push(emptyWrapper);
+        expect(emptyWrapper.find('[data-testid="overview-recent-leads-empty"]').exists()).toBe(true);
+        expect(emptyWrapper.find('[data-testid="overview-closing-soon-empty"]').exists()).toBe(true);
+
+        // Loading state
+        const loadingWrapper = mount(CrmOverviewPage, {
+            attachTo: document.body,
+            props: {
+                overview: makeOverviewData(),
+                can: defaultCan,
+                initialState: 'loading',
+            },
+        });
+        mountedWrappers.push(loadingWrapper);
+        expect(loadingWrapper.find('[data-testid="overview-loading"]').exists()).toBe(true);
+
+        // Error state
+        const errorWrapper = mount(CrmOverviewPage, {
+            attachTo: document.body,
+            props: {
+                overview: makeOverviewData(),
+                can: defaultCan,
                 initialState: 'error',
-                initialError: 'Upstream queue unavailable.',
+                initialError: 'Upstream CRM query unavailable.',
             },
         });
         mountedWrappers.push(errorWrapper);
-        const errorState = errorWrapper.get('[data-testid="overview-error-state"]');
+        const errorState = errorWrapper.get('[data-testid="overview-error"]');
         expect(errorState.attributes('role')).toBe('alert');
-        expect(errorState.text()).toContain('Upstream queue unavailable.');
+        expect(errorState.text()).toContain('Upstream CRM query unavailable.');
     });
 
     it('renders LoginPage with email/password autofill, show-password toggle, and role="alert" error banner', async () => {
@@ -385,11 +504,17 @@ describe('WorkspaceShellLayout & Core Pages', () => {
 
         const wrapper = mount(LoginPage, {
             attachTo: document.body,
+            props: {
+                demoSuperadmin: {
+                    email: 'superadmin@example.com',
+                    password: 'SuperAdmin123!',
+                },
+            },
         });
         mountedWrappers.push(wrapper);
 
-        const emailInput = wrapper.get('input#email');
-        const passwordInput = wrapper.get('input#password');
+        const emailInput = wrapper.get<HTMLInputElement>('input#email');
+        const passwordInput = wrapper.get<HTMLInputElement>('input#password');
 
         expect(emailInput.attributes('type')).toBe('email');
         expect(emailInput.attributes('autocomplete')).toBe('username');
@@ -397,24 +522,27 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         expect(passwordInput.attributes('type')).toBe('password');
         expect(passwordInput.attributes('autocomplete')).toBe('current-password');
 
-        await wrapper.get('[data-testid="toggle-password-visibility"]').trigger('click');
-        expect(wrapper.get('input#password').attributes('type')).toBe('text');
+        await wrapper.get('[data-testid="fill-superadmin-credentials"]').trigger('click');
+        expect(emailInput.element.value).toBe('superadmin@example.com');
+        expect(passwordInput.element.value).toBe('SuperAdmin123!');
 
-        await emailInput.setValue('superadmin@example.com');
-        await passwordInput.setValue('SuperAdmin123!');
-        await wrapper.get('form').trigger('submit');
-        expect(mockRouterPost).toHaveBeenCalledWith(
-            '/login',
-            expect.objectContaining({ onFinish: expect.any(Function) }),
-        );
+        await wrapper.get('[data-testid="toggle-password-visibility"]').trigger('click');
+        expect(passwordInput.attributes('type')).toBe('text');
+
+        if (mockFormStateRef.current) {
+            mockFormStateRef.current.errors = { email: 'These credentials do not match our records.' };
+        }
+        await nextTick();
+        const alertBanner = wrapper.get('[role="alert"]');
+        expect(alertBanner.text()).toContain('These credentials do not match our records.');
     });
 
-    it('renders UsersPage directory and Create User dialog with new-password rules and superadmin-only nav visibility', async () => {
+    it('gates Admin Users link by admin.users and renders UsersPage with autocomplete="new-password" modal', async () => {
         const mockEcho = createMockEcho();
         setEchoInstanceForTesting(mockEcho.client);
 
-        // Regular operations_manager does not see Admin -> Users nav link
-        const standardWrapper = mount(WorkspaceShellLayout, {
+        // Standard user without admin.users must NOT see Users link
+        const standardWrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: { default: () => h('div', 'Body') },
         });
@@ -430,7 +558,7 @@ describe('WorkspaceShellLayout & Core Pages', () => {
                 permissions: ['admin.users'],
             },
         };
-        const superWrapper = mount(WorkspaceShellLayout, {
+        const superWrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: { default: () => h('div', 'Body') },
         });
@@ -475,14 +603,14 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         );
     });
 
-    it('enforces auth RBAC helpers, safe Echo fallback without Reverb key, theme toggle, and logout lock', async () => {
+    it('enforces auth RBAC helpers, safe Echo fallback without Reverb key, crm-theme toggle, and logout lock', async () => {
         const authStore = useAuthStore();
         authStore.setUser(makeUser());
 
         expect(authStore.isAuthenticated).toBe(true);
-        expect(authStore.hasRole('operations_manager')).toBe(true);
+        expect(authStore.hasRole('director')).toBe(true);
         expect(authStore.hasRole('admin')).toBe(false);
-        expect(authStore.hasPermission('handoffs.review')).toBe(true);
+        expect(authStore.hasPermission('leads.convert')).toBe(true);
         expect(authStore.hasPermission('admin.users')).toBe(false);
 
         expect(mapEchoConnectionStatus('connected')).toBe('connected');
@@ -497,7 +625,7 @@ describe('WorkspaceShellLayout & Core Pages', () => {
         const mockEcho = createMockEcho();
         setEchoInstanceForTesting(mockEcho.client);
 
-        const wrapper = mount(WorkspaceShellLayout, {
+        const wrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: {
                 default: () => h('div', 'Shell body'),
@@ -508,6 +636,7 @@ describe('WorkspaceShellLayout & Core Pages', () => {
 
         await wrapper.get('[data-testid="theme-toggle"]').trigger('click');
         expect(document.documentElement.classList.contains('dark')).toBe(true);
+        expect(localStorage.getItem('crm-theme')).toBe('dark');
 
         const signOutButton = wrapper.get('button[aria-label="Sign out"]');
         await signOutButton.trigger('click');

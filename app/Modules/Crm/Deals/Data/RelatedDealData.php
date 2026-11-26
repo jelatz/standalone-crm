@@ -30,6 +30,8 @@ class RelatedDealData extends Data
         public ?string $won_at,
         public ?string $lost_at,
         public string $updated_at,
+        public ?int $win_probability = null,
+        public int $effective_win_probability = 0,
     ) {}
 
     public static function fromModel(
@@ -41,6 +43,10 @@ class RelatedDealData extends Data
         $stage = $deal->relationLoaded('stage') ? $deal->stage : null;
         $owner = $deal->relationLoaded('owner') ? $deal->owner : null;
         $accountManager = $deal->relationLoaded('accountManager') ? $deal->accountManager : null;
+
+        $effectiveWinProbability = $deal->win_probability !== null
+            ? (int) $deal->win_probability
+            : ($stage?->win_probability ?? 0);
 
         return new self(
             id: (string) $deal->id,
@@ -64,6 +70,8 @@ class RelatedDealData extends Data
             won_at: $deal->won_at?->toIso8601String(),
             lost_at: $deal->lost_at?->toIso8601String(),
             updated_at: $deal->updated_at?->toIso8601String() ?? now()->toIso8601String(),
+            win_probability: $deal->win_probability !== null ? (int) $deal->win_probability : null,
+            effective_win_probability: $effectiveWinProbability,
         );
     }
 }

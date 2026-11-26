@@ -28,7 +28,10 @@ class ActivityData extends Data
         public ?NoteData $note = null,
     ) {}
 
-    public static function fromModel(Activity $activity, ?NoteData $note = null): self
+    /**
+     * @param  array<string, mixed>|null  $metadataOverride
+     */
+    public static function fromModel(Activity $activity, ?NoteData $note = null, ?array $metadataOverride = null): self
     {
         $actorName = $activity->relationLoaded('actor') ? $activity->actor?->name : null;
 
@@ -41,7 +44,7 @@ class ActivityData extends Data
             source_id: (string) $activity->source_id,
             visibility_mode: $activity->visibility_mode,
             summary: $activity->summary,
-            metadata: $activity->metadata ?? [],
+            metadata: $metadataOverride ?? ($activity->metadata ?? []),
             occurred_at: $activity->occurred_at->toIso8601String(),
             note: $note,
         );

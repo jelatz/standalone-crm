@@ -9,6 +9,7 @@ use App\Support\Silo\VisibleScopeResolver;
 use Database\Seeders\DatabaseSeeder;
 use Database\Seeders\RolesPermissionsSeeder;
 use Illuminate\Support\Facades\Hash;
+use Inertia\Testing\AssertableInertia as Assert;
 
 it('seeds an active superadmin user with unrestricted silo visibility and valid password hash', function (): void {
     $this->seed(DatabaseSeeder::class);
@@ -164,4 +165,28 @@ it('allows superadmin to view users, create a new user with role and department,
 
     $this->assertAuthenticatedAs($created);
     $this->get('/app')->assertOk();
+});
+
+it('exposes demoSuperadmin credentials on GET /login only in local environment', function (): void {
+    $this->get('/login')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('core/pages/LoginPage')
+            ->where('demoSuperadmin', null)
+        );
+
+    $originalEnv = app()->environment();
+    app()->detectEnvironment(fn (): string => 'local');
+
+    try {
+        $this->get('/login')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('core/pages/LoginPage')
+                ->where('demoSuperadmin.email', 'superadmin@example.com')
+                ->where('demoSuperadmin.password', 'SuperAdmin123!')
+            );
+    } finally {
+        app()->detectEnvironment(fn (): string => $originalEnv);
+    }
 });

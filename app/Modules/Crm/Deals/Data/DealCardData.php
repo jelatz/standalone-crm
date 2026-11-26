@@ -39,6 +39,8 @@ class DealCardData extends Data
         public bool $is_rotting,
         public array $custom_fields,
         public string $updated_at,
+        public ?int $win_probability = null,
+        public int $effective_win_probability = 0,
     ) {}
 
     public static function fromModel(
@@ -58,6 +60,10 @@ class DealCardData extends Data
             && $stage->rotting_days > 0
             && $deal->stage_entered_at !== null
             && $deal->stage_entered_at->addDays($stage->rotting_days)->isPast();
+
+        $effectiveWinProbability = $deal->win_probability !== null
+            ? (int) $deal->win_probability
+            : ($stage?->win_probability ?? 0);
 
         return new self(
             id: (string) $deal->id,
@@ -89,6 +95,8 @@ class DealCardData extends Data
             is_rotting: $isRotting,
             custom_fields: $deal->custom_fields ?? [],
             updated_at: $deal->updated_at?->toIso8601String() ?? now()->toIso8601String(),
+            win_probability: $deal->win_probability !== null ? (int) $deal->win_probability : null,
+            effective_win_probability: $effectiveWinProbability,
         );
     }
 }

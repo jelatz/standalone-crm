@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Modules\Core\AsyncJobs\Models\AsyncJobRun;
 use App\Modules\Core\Attachments\Models\Attachment;
 use App\Modules\Core\Attachments\Policies\AttachmentPolicy;
+use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\Team;
 use App\Modules\Core\Users\Models\User;
@@ -17,21 +18,15 @@ use App\Modules\Crm\CustomFields\Models\CustomFieldDefinition;
 use App\Modules\Crm\CustomFields\Policies\CustomFieldDefinitionPolicy;
 use App\Modules\Crm\Deals\Models\Deal;
 use App\Modules\Crm\Deals\Policies\DealPolicy;
+use App\Modules\Crm\Leads\Console\ImportLeadsCommand;
+use App\Modules\Crm\Leads\Models\Lead;
+use App\Modules\Crm\Leads\Policies\LeadPolicy;
 use App\Modules\Crm\Notes\Models\Note;
 use App\Modules\Crm\Notes\Policies\NotePolicy;
 use App\Modules\Crm\Pipelines\Models\Pipeline;
 use App\Modules\Crm\Pipelines\Models\PipelineStage;
 use App\Modules\Crm\Pipelines\Policies\PipelinePolicy;
 use App\Modules\Crm\Timeline\Models\Activity;
-use App\Modules\Projects\Handoffs\Models\DealHandoff;
-use App\Modules\Projects\Handoffs\Policies\DealHandoffPolicy;
-use App\Modules\Projects\Projects\Models\Project;
-use App\Modules\Projects\Projects\Models\ProjectStage;
-use App\Modules\Projects\Projects\Policies\ProjectPolicy;
-use App\Modules\Projects\Tasks\Models\Task;
-use App\Modules\Projects\Tasks\Policies\TaskPolicy;
-use App\Modules\Projects\Templates\Models\ProjectTemplate;
-use App\Modules\Projects\Templates\Policies\ProjectTemplatePolicy;
 use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -50,6 +45,12 @@ class ModularDomainServiceProvider extends ServiceProvider
         $this->registerMorphMap();
         $this->registerModulePolicies();
         $this->registerModuleRoutes();
+
+        if ($this->app->runningInConsole() && class_exists(ImportLeadsCommand::class)) {
+            $this->commands([
+                ImportLeadsCommand::class,
+            ]);
+        }
     }
 
     protected function registerMorphMap(): void
@@ -70,6 +71,9 @@ class ModularDomainServiceProvider extends ServiceProvider
         }
         if (class_exists(AsyncJobRun::class)) {
             $morphMap['async_job_run'] = AsyncJobRun::class;
+        }
+        if (class_exists(Lead::class)) {
+            $morphMap['lead'] = Lead::class;
         }
         if (class_exists(Company::class)) {
             $morphMap['company'] = Company::class;
@@ -95,21 +99,6 @@ class ModularDomainServiceProvider extends ServiceProvider
         if (class_exists(Activity::class)) {
             $morphMap['activity'] = Activity::class;
         }
-        if (class_exists(ProjectTemplate::class)) {
-            $morphMap['project_template'] = ProjectTemplate::class;
-        }
-        if (class_exists(DealHandoff::class)) {
-            $morphMap['deal_handoff'] = DealHandoff::class;
-        }
-        if (class_exists(Project::class)) {
-            $morphMap['project'] = Project::class;
-        }
-        if (class_exists(ProjectStage::class)) {
-            $morphMap['project_stage'] = ProjectStage::class;
-        }
-        if (class_exists(Task::class)) {
-            $morphMap['task'] = Task::class;
-        }
 
         if ($morphMap !== []) {
             Relation::enforceMorphMap($morphMap);
@@ -121,16 +110,13 @@ class ModularDomainServiceProvider extends ServiceProvider
         $policies = [
             Attachment::class => AttachmentPolicy::class,
             User::class => UserPolicy::class,
+            Lead::class => LeadPolicy::class,
             Company::class => CompanyPolicy::class,
             Contact::class => ContactPolicy::class,
             Deal::class => DealPolicy::class,
             Pipeline::class => PipelinePolicy::class,
             CustomFieldDefinition::class => CustomFieldDefinitionPolicy::class,
             Note::class => NotePolicy::class,
-            ProjectTemplate::class => ProjectTemplatePolicy::class,
-            DealHandoff::class => DealHandoffPolicy::class,
-            Project::class => ProjectPolicy::class,
-            Task::class => TaskPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -138,6 +124,13 @@ class ModularDomainServiceProvider extends ServiceProvider
                 Gate::policy($model, $policy);
             }
         }
+
+        Gate::define(
+            'crm.overview.view',
+            static fn (User $user): bool => $user->status === UserStatusEnum::Active
+                && $user->deleted_at === null
+                && $user->roles()->exists(),
+        );
     }
 
     protected function registerModuleRoutes(): void

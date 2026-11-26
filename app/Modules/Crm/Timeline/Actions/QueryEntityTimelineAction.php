@@ -7,15 +7,14 @@ use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Companies\Models\Company;
 use App\Modules\Crm\Contacts\Models\Contact;
 use App\Modules\Crm\Deals\Models\Deal;
+use App\Modules\Crm\Leads\Models\Lead;
 use App\Modules\Crm\Notes\Data\NoteData;
 use App\Modules\Crm\Notes\Models\Note;
 use App\Modules\Crm\Timeline\Data\ActivityData;
 use App\Modules\Crm\Timeline\Data\TimelinePageData;
+use App\Modules\Crm\Timeline\Enums\ActivityTypeEnum;
 use App\Modules\Crm\Timeline\Models\Activity;
 use App\Modules\Crm\Timeline\Models\ActivityLink;
-use App\Modules\Projects\Handoffs\Models\DealHandoff;
-use App\Modules\Projects\Projects\Models\Project;
-use App\Modules\Projects\Tasks\Models\Task;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -30,23 +29,21 @@ class QueryEntityTimelineAction
      * @var list<string>
      */
     public const array ALLOWED_LINKABLE_TYPES = [
+        'lead',
         'company',
         'contact',
         'deal',
-        'project',
     ];
 
     /**
      * @var list<string>
      */
     public const array ALLOWED_SOURCE_TYPES = [
+        'lead',
         'deal',
         'contact',
         'company',
         'note',
-        'project',
-        'task',
-        'deal_handoff',
     ];
 
     public const int MAX_SCAN_BATCHES = 20;
@@ -87,12 +84,10 @@ class QueryEntityTimelineAction
 
         $batchSize = max($clampedLimit * 2, 50);
         $isAdmin = $viewer->hasAnyRole([RoleEnum::Superadmin->value, RoleEnum::Admin->value]);
+        $canViewLeads = Gate::forUser($viewer)->allows('viewAny', Lead::class);
         $canViewDeals = Gate::forUser($viewer)->allows('viewAny', Deal::class);
         $canViewContacts = Gate::forUser($viewer)->allows('viewAny', Contact::class);
         $canViewCompanies = Gate::forUser($viewer)->allows('viewAny', Company::class);
-        $canViewProjects = Gate::forUser($viewer)->allows('viewAny', Project::class);
-        $canViewTasks = Gate::forUser($viewer)->allows('viewAny', Task::class);
-        $canViewHandoffs = Gate::forUser($viewer)->allows('viewAny', DealHandoff::class);
         $batchesScanned = 0;
 
         /** @var list<array{data: ActivityData, occurred_at: CarbonInterface, activity_id: string}> $visibleEntries */
@@ -131,13 +126,11 @@ class QueryEntityTimelineAction
             $lastLink = $links->last();
             $scanCursor = [$lastLink->occurred_at, (string) $lastLink->activity_id];
 
+            $leadIds = [];
             $dealIds = [];
             $contactIds = [];
             $companyIds = [];
             $noteIds = [];
-            $projectIds = [];
-            $taskIds = [];
-            $handoffIds = [];
 
             foreach ($links as $link) {
                 $activity = $link->activity;
@@ -146,16 +139,30 @@ class QueryEntityTimelineAction
                 }
 
                 match ($activity->source_type) {
+                    'lead' => $leadIds[] = (string) $activity->source_id,
                     'deal' => $dealIds[] = (string) $activity->source_id,
                     'contact' => $contactIds[] = (string) $activity->source_id,
                     'company' => $companyIds[] = (string) $activity->source_id,
                     'note' => $noteIds[] = (string) $activity->source_id,
-                    'project' => $projectIds[] = (string) $activity->source_id,
-                    'task' => $taskIds[] = (string) $activity->source_id,
-                    'deal_handoff' => $handoffIds[] = (string) $activity->source_id,
                     default => null,
                 };
+
+                if ($activity->activity_type === ActivityTypeEnum::LeadConverted && is_array($activity->metadata)) {
+                    if (is_string($activity->metadata['company_id'] ?? null) && $activity->metadata['company_id'] !== '') {
+                        $companyIds[] = $activity->metadata['company_id'];
+                    }
+                    if (is_string($activity->metadata['contact_id'] ?? null) && $activity->metadata['contact_id'] !== '') {
+                        $contactIds[] = $activity->metadata['contact_id'];
+                    }
+                    if (is_string($activity->metadata['deal_id'] ?? null) && $activity->metadata['deal_id'] !== '') {
+                        $dealIds[] = $activity->metadata['deal_id'];
+                    }
+                }
             }
+
+            $visibleLeadIds = ($canViewLeads && $leadIds !== [])
+                ? Lead::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($leadIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
+                : [];
 
             $visibleDealIds = ($canViewDeals && $dealIds !== [])
                 ? Deal::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($dealIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
@@ -169,20 +176,8 @@ class QueryEntityTimelineAction
                 ? Company::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($companyIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
                 : [];
 
-            $visibleProjectIds = ($canViewProjects && $projectIds !== [])
-                ? Project::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($projectIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
-                : [];
-
             $notesById = $noteIds !== []
                 ? Note::query()->with('author')->whereIn('id', array_values(array_unique($noteIds)))->get()->keyBy(static fn (Note $note): string => (string) $note->id)
-                : collect();
-
-            $tasksById = ($canViewTasks && $taskIds !== [])
-                ? Task::query()->with(['parent.project', 'project'])->whereIn('id', array_values(array_unique($taskIds)))->get()->keyBy(static fn (Task $task): string => (string) $task->id)
-                : collect();
-
-            $handoffsById = ($canViewHandoffs && $handoffIds !== [])
-                ? DealHandoff::query()->with('deal')->whereIn('id', array_values(array_unique($handoffIds)))->get()->keyBy(static fn (DealHandoff $handoff): string => (string) $handoff->id)
                 : collect();
 
             foreach ($links as $link) {
@@ -206,7 +201,11 @@ class QueryEntityTimelineAction
                     continue;
                 }
 
-                if ($activity->source_type === 'deal') {
+                if ($activity->source_type === 'lead') {
+                    if (! isset($visibleLeadIds[$sourceId])) {
+                        continue;
+                    }
+                } elseif ($activity->source_type === 'deal') {
                     if (! isset($visibleDealIds[$sourceId])) {
                         continue;
                     }
@@ -216,30 +215,6 @@ class QueryEntityTimelineAction
                     }
                 } elseif ($activity->source_type === 'company') {
                     if (! isset($visibleCompanyIds[$sourceId])) {
-                        continue;
-                    }
-                } elseif ($activity->source_type === 'project') {
-                    if (! isset($visibleProjectIds[$sourceId])) {
-                        continue;
-                    }
-                } elseif ($activity->source_type === 'task') {
-                    if (! $canViewTasks) {
-                        continue;
-                    }
-
-                    /** @var Task|null $task */
-                    $task = $tasksById->get($sourceId);
-                    if ($task === null || ! Gate::forUser($viewer)->allows('view', $task)) {
-                        continue;
-                    }
-                } elseif ($activity->source_type === 'deal_handoff') {
-                    if (! $canViewHandoffs) {
-                        continue;
-                    }
-
-                    /** @var DealHandoff|null $handoff */
-                    $handoff = $handoffsById->get($sourceId);
-                    if ($handoff === null || ! Gate::forUser($viewer)->allows('view', $handoff)) {
                         continue;
                     }
                 } elseif ($activity->source_type === 'note') {
@@ -254,8 +229,20 @@ class QueryEntityTimelineAction
                     continue;
                 }
 
+                $metadataOverride = null;
+                if ($activity->activity_type === ActivityTypeEnum::LeadConverted && is_array($activity->metadata)) {
+                    $metadataOverride = $activity->metadata;
+                    $metaCompanyId = is_string($metadataOverride['company_id'] ?? null) ? $metadataOverride['company_id'] : null;
+                    $metaContactId = is_string($metadataOverride['contact_id'] ?? null) ? $metadataOverride['contact_id'] : null;
+                    $metaDealId = is_string($metadataOverride['deal_id'] ?? null) ? $metadataOverride['deal_id'] : null;
+
+                    $metadataOverride['company_id'] = ($metaCompanyId !== null && isset($visibleCompanyIds[$metaCompanyId])) ? $metaCompanyId : null;
+                    $metadataOverride['contact_id'] = ($metaContactId !== null && isset($visibleContactIds[$metaContactId])) ? $metaContactId : null;
+                    $metadataOverride['deal_id'] = ($metaDealId !== null && isset($visibleDealIds[$metaDealId])) ? $metaDealId : null;
+                }
+
                 $visibleEntries[] = [
-                    'data' => ActivityData::fromModel($activity, $noteData),
+                    'data' => ActivityData::fromModel($activity, $noteData, $metadataOverride),
                     'occurred_at' => $link->occurred_at,
                     'activity_id' => (string) $link->activity_id,
                 ];

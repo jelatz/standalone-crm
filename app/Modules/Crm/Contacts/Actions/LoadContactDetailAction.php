@@ -56,7 +56,7 @@ class LoadContactDetailAction
                                 ->where('deal_contacts.contact_id', '=', $contact->id);
                         });
                 })
-                ->with(['pipeline:id,name', 'stage:id,name,stage_type', 'owner:id,name', 'accountManager:id,name'])
+                ->with(['pipeline:id,name', 'stage:id,name,stage_type,win_probability', 'owner:id,name', 'accountManager:id,name'])
                 ->orderByDesc('updated_at')
                 ->get()
             : new EloquentCollection;

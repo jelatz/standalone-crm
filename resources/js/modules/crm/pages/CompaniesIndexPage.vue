@@ -230,7 +230,7 @@ const createFieldErrors = ref<Record<string, string>>({});
 const createForm = ref({
     name: '',
     domain: '',
-    lifecycle_stage: 'lead' as App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
+    lifecycle_stage: 'prospect' as App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum,
     industry: '',
     employee_range: '',
     annual_revenue_dollars: '',
@@ -244,7 +244,7 @@ function openCreateModal(): void {
     createForm.value = {
         name: '',
         domain: '',
-        lifecycle_stage: (props.lifecycleStages[0] as App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum) || 'lead',
+        lifecycle_stage: (props.lifecycleStages[0] as App.Modules.Crm.Companies.Enums.CompanyLifecycleStageEnum) || 'prospect',
         industry: '',
         employee_range: '',
         annual_revenue_dollars: '',

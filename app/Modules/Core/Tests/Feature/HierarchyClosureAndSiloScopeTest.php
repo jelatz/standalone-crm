@@ -280,15 +280,15 @@ it('seeds all 8 RBAC roles and permissions idempotently and enforces PostgreSQL 
     expect($seededPermNames)->toEqualCanonicalizing($expectedPermNames);
 
     $opsManagerRole = Role::findByName(RoleEnum::OperationsManager->value, 'web');
-    expect($opsManagerRole->hasPermissionTo(PermissionEnum::HandoffsReview->value))->toBeTrue()
-        ->and($opsManagerRole->hasPermissionTo(PermissionEnum::HandoffsApprove->value))->toBeTrue()
-        ->and($opsManagerRole->hasPermissionTo(PermissionEnum::ProjectsManageTemplates->value))->toBeTrue()
+    expect($opsManagerRole->hasPermissionTo(PermissionEnum::LeadsView->value))->toBeTrue()
+        ->and($opsManagerRole->hasPermissionTo(PermissionEnum::DealsView->value))->toBeTrue()
+        ->and($opsManagerRole->hasPermissionTo(PermissionEnum::LeadsConvert->value))->toBeFalse()
         ->and($opsManagerRole->hasPermissionTo(PermissionEnum::AdminUsers->value))->toBeFalse();
 
     $salesRole = Role::findByName(RoleEnum::Sales->value, 'web');
     expect($salesRole->hasPermissionTo(PermissionEnum::DealsMoveStage->value))->toBeTrue()
-        ->and($salesRole->hasPermissionTo(PermissionEnum::HandoffsSubmit->value))->toBeTrue()
-        ->and($salesRole->hasPermissionTo(PermissionEnum::HandoffsApprove->value))->toBeFalse()
+        ->and($salesRole->hasPermissionTo(PermissionEnum::LeadsConvert->value))->toBeTrue()
+        ->and($salesRole->hasPermissionTo(PermissionEnum::LeadsCreate->value))->toBeTrue()
         ->and($salesRole->hasPermissionTo(PermissionEnum::DealsOverrideGates->value))->toBeFalse();
 
     $itRole = Role::findByName(RoleEnum::It->value, 'web');

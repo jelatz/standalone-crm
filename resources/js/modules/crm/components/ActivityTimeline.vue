@@ -5,8 +5,6 @@ import {
     ArrowRightLeft,
     CheckCircle2,
     FileEdit,
-    Mail,
-    MessageSquare,
     Pin,
     PinOff,
     PlusCircle,
@@ -19,11 +17,11 @@ import RichJsonRenderer from './RichJsonRenderer.vue';
 import { crmApi } from '@/modules/crm/api/crmApi';
 import { formatDateTime, formatEnumLabel } from '@/modules/crm/utils/formatters';
 
-type TimelineFilter = 'all' | 'notes' | 'stages' | 'fields' | 'tasks' | 'messaging';
+type TimelineFilter = 'all' | 'notes' | 'stages' | 'fields';
 
 const props = withDefaults(
     defineProps<{
-        linkableType: 'company' | 'contact' | 'deal' | 'project';
+        linkableType: 'lead' | 'company' | 'contact' | 'deal';
         linkableId: string;
         initialPage: App.Modules.Crm.Timeline.Data.TimelinePageData;
         canCreateNote?: boolean;
@@ -63,10 +61,8 @@ const busyNoteId = ref<string | null>(null);
 const filterTabs: Array<{ key: TimelineFilter; label: string }> = [
     { key: 'all', label: 'All' },
     { key: 'notes', label: 'Notes' },
-    { key: 'stages', label: 'Stage Changes' },
+    { key: 'stages', label: 'Deals & Conversions' },
     { key: 'fields', label: 'Field Updates' },
-    { key: 'tasks', label: 'Tasks & Handoffs' },
-    { key: 'messaging', label: 'Messaging' },
 ];
 
 const pinnedEntries = computed(() =>
@@ -84,26 +80,15 @@ function matchesFilter(
         return activityType === 'note_created';
     }
     if (filter === 'stages') {
-        return activityType === 'stage_changed' || activityType === 'deal_created';
+        return (
+            activityType === 'stage_changed' ||
+            activityType === 'deal_created' ||
+            activityType === 'lead_created' ||
+            activityType === 'lead_converted'
+        );
     }
     if (filter === 'fields') {
         return activityType === 'field_updated';
-    }
-    if (filter === 'tasks') {
-        return (
-            activityType === 'task_created' ||
-            activityType === 'task_completed' ||
-            activityType === 'handoff_submitted' ||
-            activityType === 'handoff_approved' ||
-            activityType === 'project_provisioned'
-        );
-    }
-    if (filter === 'messaging') {
-        return (
-            activityType === 'email_received' ||
-            activityType === 'email_sent' ||
-            activityType === 'chat_thread_created'
-        );
     }
     return true;
 }
@@ -119,15 +104,10 @@ function iconForActivity(activityType: App.Modules.Crm.Timeline.Enums.ActivityTy
         case 'stage_changed':
             return ArrowRightLeft;
         case 'deal_created':
+        case 'lead_created':
             return PlusCircle;
-        case 'task_completed':
-        case 'handoff_approved':
+        case 'lead_converted':
             return CheckCircle2;
-        case 'email_received':
-        case 'email_sent':
-            return Mail;
-        case 'chat_thread_created':
-            return MessageSquare;
         default:
             return FileEdit;
     }

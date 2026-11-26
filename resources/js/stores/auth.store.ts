@@ -2,8 +2,8 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
 export type AuthenticatedUser = App.Modules.Core.Auth.Data.AuthenticatedUserData;
-export type WorkspaceRole = App.Modules.Core.Rbac.Enums.RoleEnum;
-export type WorkspacePermission = App.Modules.Core.Rbac.Enums.PermissionEnum;
+export type CrmRole = App.Modules.Core.Rbac.Enums.RoleEnum;
+export type CrmPermission = App.Modules.Core.Rbac.Enums.PermissionEnum;
 
 export const useAuthStore = defineStore('auth', () => {
     const user = ref<AuthenticatedUser | null>(null);
@@ -19,11 +19,11 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = authProps?.user ?? null;
     }
 
-    function hasRole(role: WorkspaceRole | string): boolean {
+    function hasRole(role: CrmRole | string): boolean {
         return user.value?.roles.includes(role) ?? false;
     }
 
-    function hasPermission(permission: WorkspacePermission | string): boolean {
+    function hasPermission(permission: CrmPermission | string): boolean {
         return user.value?.permissions.includes(permission) ?? false;
     }
 

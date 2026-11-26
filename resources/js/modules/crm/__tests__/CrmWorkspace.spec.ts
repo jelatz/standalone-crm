@@ -76,7 +76,7 @@ vi.mock('@inertiajs/vue3', async () => {
 });
 
 import DataTable from '@/components/data-table/DataTable.vue';
-import WorkspaceShellLayout from '@/layouts/WorkspaceShellLayout.vue';
+import CrmShellLayout from '@/layouts/CrmShellLayout.vue';
 import ActivityTimeline from '@/modules/crm/components/ActivityTimeline.vue';
 import CustomFieldsForm from '@/modules/crm/components/CustomFieldsForm.vue';
 import DealKanbanBoard from '@/modules/crm/components/DealKanbanBoard.vue';
@@ -85,6 +85,8 @@ import CompanyDetailPage from '@/modules/crm/pages/CompanyDetailPage.vue';
 import ContactDetailPage from '@/modules/crm/pages/ContactDetailPage.vue';
 import DealDetailPage from '@/modules/crm/pages/DealDetailPage.vue';
 import DealsIndexPage from '@/modules/crm/pages/DealsIndexPage.vue';
+import LeadDetailPage from '@/modules/crm/pages/LeadDetailPage.vue';
+import LeadsIndexPage from '@/modules/crm/pages/LeadsIndexPage.vue';
 import PipelineSettingsPage from '@/modules/crm/pages/PipelineSettingsPage.vue';
 
 function makeUser(permissions: string[] = ['deals.view', 'deals.move_stage']): App.Modules.Core.Auth.Data.AuthenticatedUserData {
@@ -143,6 +145,8 @@ function makeDealCard(
         amount_cents: 1200000,
         currency: 'USD',
         expected_close_date: '2026-12-15',
+        win_probability: null,
+        effective_win_probability: 20,
         stage_entered_at: '2026-11-20T10:00:00Z',
         won_at: null,
         lost_at: null,
@@ -180,6 +184,8 @@ function makeDealDetailFromCard(
         amount_cents: card.amount_cents,
         currency: card.currency,
         expected_close_date: card.expected_close_date,
+        win_probability: card.win_probability,
+        effective_win_probability: card.effective_win_probability,
         stage_entered_at: card.stage_entered_at,
         won_at: card.won_at,
         lost_at: card.lost_at,
@@ -892,13 +898,13 @@ describe('CRM Workspace Components & Interactions', () => {
         expect(alertEl.text()).toContain('Field url must be a valid http or https URL.');
     });
 
-    it('gates CRM Settings nav item in WorkspaceShellLayout by pipelines.manage or custom_fields.manage', async () => {
+    it('gates CRM Settings nav item in CrmShellLayout by pipelines.manage or custom_fields.manage', async () => {
         mockPage.props = {
             auth: { user: makeUser(['deals.view']) },
             errors: {},
         };
 
-        const restrictedWrapper = mount(WorkspaceShellLayout, {
+        const restrictedWrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: { default: () => h('div', 'CRM') },
         });
@@ -1202,7 +1208,7 @@ describe('CRM Workspace Components & Interactions', () => {
                 customFieldDefinitions: [],
                 timeline: { items: [], next_cursor: null, has_more: false },
                 assignableUsers: [],
-                lifecycleStages: ['lead', 'prospect', 'active_client'],
+                lifecycleStages: ['prospect', 'active_client'],
                 collaboratorAccessLevels: ['viewer', 'editor'],
                 collaboratorRoleLabels: ['account_manager'],
                 can: {
@@ -1456,6 +1462,461 @@ describe('CRM Workspace Components & Interactions', () => {
             crmHttpClient.defaults.adapter = originalAdapter;
             metaEl.remove();
             document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        }
+    });
+
+    it('renders LeadsIndexPage, LeadDetailPage + ConvertLeadDialog with win_probability override, and masked converted states', async () => {
+        const board = makeBoard();
+        const leadItem: App.Modules.Crm.Leads.Data.LeadListItemData = {
+            id: 'lead-1',
+            owner_id: 'usr-200',
+            owner_name: 'Devon Alvarez',
+            first_name: 'Elena',
+            last_name: 'Vance',
+            full_name: 'Elena Vance',
+            email: 'elena@northstar.io',
+            phone: '+1-415-555-0142',
+            job_title: 'VP Operations',
+            company_name: 'Northstar Robotics',
+            website: 'https://northstar.io',
+            status: 'qualified',
+            source: 'referral',
+            estimated_value_cents: 5000000,
+            currency: 'USD',
+            converted_at: null,
+            converted_company_id: null,
+            converted_contact_id: null,
+            converted_deal_id: null,
+            custom_fields: {},
+            created_at: '2026-11-20T10:00:00Z',
+            updated_at: '2026-11-25T10:00:00Z',
+        };
+
+        const leadsWrapper = mount(LeadsIndexPage, {
+            attachTo: document.body,
+            props: {
+                leads: {
+                    data: [leadItem],
+                    current_page: 1,
+                    last_page: 1,
+                    per_page: 25,
+                    total: 1,
+                },
+                statusCounts: {
+                    all: 1,
+                    new: 0,
+                    contacted: 0,
+                    working: 0,
+                    qualified: 1,
+                    unqualified: 0,
+                    converted: 0,
+                },
+                filters: {
+                    search: null,
+                    status: null,
+                    source: null,
+                    owner_id: null,
+                    custom_fields: {},
+                    sort_by: null,
+                    sort_dir: null,
+                    page: 1,
+                    per_page: 25,
+                },
+                filterDefinitions: [],
+                customFieldDefinitions: [],
+                assignableUsers: [],
+                statuses: ['new', 'contacted', 'working', 'qualified', 'unqualified', 'converted'],
+                sources: ['inbound_web', 'referral'],
+                can: {
+                    create: true,
+                    convert: true,
+                },
+            },
+        });
+        mountedWrappers.push(leadsWrapper);
+        await nextTick();
+
+        expect(leadsWrapper.get('[data-testid="leads-data-table"]').text()).toContain('Elena Vance');
+        expect(leadsWrapper.get('[data-testid="lead-status-tab-qualified"]').text()).toContain('1');
+
+        const unconvertedLead: App.Modules.Crm.Leads.Data.LeadDetailData = {
+            ...leadItem,
+            website: 'https://northstar.io',
+            disqualified_reason: null,
+            converted_company_id: null,
+            converted_contact_id: null,
+            converted_deal_id: null,
+            custom_fields: {},
+            created_at: '2026-11-20T10:00:00Z',
+            has_masked_converted_company: false,
+            has_masked_converted_contact: false,
+            has_masked_converted_deal: false,
+        };
+
+        const detailWrapper = mount(LeadDetailPage, {
+            attachTo: document.body,
+            props: {
+                lead: unconvertedLead,
+                convertedCompany: null,
+                convertedContact: null,
+                convertedDeal: null,
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                companies: [{ id: 'comp-1', name: 'Northwind Logistics', domain: 'northwind.internal' }],
+                pipelines: [board.pipeline],
+                statuses: ['new', 'contacted', 'working', 'qualified', 'unqualified', 'converted'],
+                sources: ['inbound_web', 'referral'],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['sales_overlay'],
+                can: {
+                    update: true,
+                    delete: true,
+                    convert: true,
+                    manageCollaborators: false,
+                    createCompany: true,
+                    createContact: true,
+                    createDeal: true,
+                },
+            },
+        });
+        mountedWrappers.push(detailWrapper);
+        await nextTick();
+
+        await detailWrapper.get('[data-testid="open-convert-lead-cta"]').trigger('click');
+        await flushPromises();
+        await nextTick();
+
+        expect(document.body.querySelector('[data-testid="confirm-convert-lead"]')).not.toBeNull();
+
+        const probInput = document.body.querySelector<HTMLInputElement>('input[id^="convert-deal-prob-"]');
+        expect(probInput).not.toBeNull();
+        if (probInput) {
+            probInput.value = '65';
+            probInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        const originalAdapter = crmHttpClient.defaults.adapter;
+        let capturedConvertPayload: Record<string, unknown> = {};
+        let capturedConvertCount = 0;
+        crmHttpClient.defaults.adapter = async (config) => {
+            capturedConvertPayload = JSON.parse(String(config.data ?? '{}')) as Record<string, unknown>;
+            capturedConvertCount += 1;
+            return {
+                data: {
+                    lead: {
+                        ...unconvertedLead,
+                        status: 'converted',
+                        converted_at: '2026-11-26T12:00:00Z',
+                        converted_company_id: 'comp-new',
+                        converted_contact_id: 'cont-new',
+                        converted_deal_id: 'deal-new',
+                    },
+                    company_id: 'comp-new',
+                    contact_id: 'cont-new',
+                    deal_id: 'deal-new',
+                },
+                status: 201,
+                statusText: 'Created',
+                headers: new AxiosHeaders(),
+                config,
+            };
+        };
+
+        try {
+            const convertBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="confirm-convert-lead"]');
+            convertBtn?.click();
+            await flushPromises();
+            await nextTick();
+
+            expect(capturedConvertCount).toBe(1);
+            expect(capturedConvertPayload.win_probability).toBe(65);
+        } finally {
+            crmHttpClient.defaults.adapter = originalAdapter;
+        }
+
+        // Masked converted entity visibility check
+        const maskedWrapper = mount(LeadDetailPage, {
+            attachTo: document.body,
+            props: {
+                lead: {
+                    ...unconvertedLead,
+                    status: 'converted',
+                    converted_at: '2026-11-26T12:00:00Z',
+                    has_masked_converted_company: true,
+                    has_masked_converted_contact: true,
+                    has_masked_converted_deal: true,
+                },
+                convertedCompany: null,
+                convertedContact: null,
+                convertedDeal: null,
+                collaborators: [],
+                attachments: [],
+                customFieldDefinitions: [],
+                timeline: { items: [], next_cursor: null, has_more: false },
+                assignableUsers: [],
+                companies: [],
+                pipelines: [],
+                statuses: ['new', 'contacted', 'working', 'qualified', 'unqualified', 'converted'],
+                sources: ['inbound_web', 'referral'],
+                collaboratorAccessLevels: ['viewer', 'editor'],
+                collaboratorRoleLabels: ['sales_overlay'],
+                can: {
+                    update: false,
+                    delete: false,
+                    convert: false,
+                    manageCollaborators: false,
+                    createCompany: false,
+                    createContact: false,
+                    createDeal: false,
+                },
+            },
+        });
+        mountedWrappers.push(maskedWrapper);
+        await nextTick();
+
+        expect(maskedWrapper.find('[data-testid="lead-masked-converted-company"]').exists()).toBe(true);
+        expect(maskedWrapper.find('[data-testid="lead-masked-converted-deal"]').exists()).toBe(true);
+    });
+
+    it('opens ImportLeadsDialog from LeadsIndexPage, previews rows, toggles selection, and commits only checked ready leads', async () => {
+        const wrapper = mount(LeadsIndexPage, {
+            attachTo: document.body,
+            props: {
+                leads: {
+                    data: [],
+                    current_page: 1,
+                    last_page: 1,
+                    per_page: 25,
+                    total: 0,
+                },
+                statusCounts: {
+                    all: 0,
+                    new: 0,
+                    contacted: 0,
+                    working: 0,
+                    qualified: 0,
+                    unqualified: 0,
+                    converted: 0,
+                },
+                filters: {
+                    search: null,
+                    status: null,
+                    source: null,
+                    owner_id: null,
+                    custom_fields: {},
+                    sort_by: null,
+                    sort_dir: null,
+                    page: 1,
+                    per_page: 25,
+                },
+                filterDefinitions: [],
+                customFieldDefinitions: [],
+                assignableUsers: [],
+                statuses: ['new', 'contacted', 'working', 'qualified', 'unqualified', 'converted'],
+                sources: ['inbound_web', 'outbound', 'referral', 'event', 'partner', 'other'],
+                can: {
+                    create: true,
+                    convert: true,
+                },
+            },
+        });
+        mountedWrappers.push(wrapper);
+        await nextTick();
+
+        await wrapper.get('[data-testid="import-leads-cta"]').trigger('click');
+        await flushPromises();
+        await nextTick();
+
+        const fileInput = document.body.querySelector<HTMLInputElement>('[data-testid="import-leads-file-input"]');
+        expect(fileInput).not.toBeNull();
+
+        const originalAdapter = crmHttpClient.defaults.adapter;
+        let capturedCommitBody: Record<string, unknown> | null = null;
+        let capturedPreviewContentType: unknown = 'unexpected';
+
+        crmHttpClient.defaults.adapter = async (config) => {
+            if (config.url === '/api/internal/crm/leads/import/preview') {
+                capturedPreviewContentType = config.headers?.['Content-Type'];
+                return {
+                    data: {
+                        headers: ['First Name', 'Last Name', 'Email', 'Company', 'Est Value'],
+                        detected_mapping: {
+                            first_name: 'First Name',
+                            last_name: 'Last Name',
+                            full_name: null,
+                            email: 'Email',
+                            phone: null,
+                            job_title: null,
+                            company_name: 'Company',
+                            website: null,
+                            source: null,
+                            estimated_value: 'Est Value',
+                            estimated_value_cents: null,
+                            currency: null,
+                        },
+                        mappable_fields: [
+                            'first_name',
+                            'last_name',
+                            'full_name',
+                            'email',
+                            'phone',
+                            'job_title',
+                            'company_name',
+                            'website',
+                            'source',
+                            'estimated_value',
+                            'estimated_value_cents',
+                            'currency',
+                        ],
+                        total_rows: 3,
+                        ready_count: 2,
+                        duplicate_count: 1,
+                        invalid_count: 0,
+                        rows: [
+                            {
+                                row_index: 1,
+                                full_name: 'Darius Patel',
+                                company_name: 'Nimbus Logistics',
+                                email: 'darius@nimbus.example',
+                                source: 'outbound',
+                                outcome: 'ready',
+                                reason: null,
+                                lead_id: null,
+                                payload: {
+                                    first_name: 'Darius',
+                                    last_name: 'Patel',
+                                    email: 'darius@nimbus.example',
+                                    phone: null,
+                                    job_title: null,
+                                    company_name: 'Nimbus Logistics',
+                                    website: null,
+                                    source: 'outbound',
+                                    estimated_value_cents: 3850000,
+                                    currency: 'USD',
+                                    custom_fields: {},
+                                },
+                            },
+                            {
+                                row_index: 2,
+                                full_name: 'Claire Moreau',
+                                company_name: 'Verve Health',
+                                email: 'claire@verve.example',
+                                source: 'referral',
+                                outcome: 'ready',
+                                reason: null,
+                                lead_id: null,
+                                payload: {
+                                    first_name: 'Claire',
+                                    last_name: 'Moreau',
+                                    email: 'claire@verve.example',
+                                    phone: null,
+                                    job_title: null,
+                                    company_name: 'Verve Health',
+                                    website: null,
+                                    source: 'referral',
+                                    estimated_value_cents: 6200000,
+                                    currency: 'USD',
+                                    custom_fields: {},
+                                },
+                            },
+                            {
+                                row_index: 3,
+                                full_name: 'Elena Vance',
+                                company_name: 'Northstar Robotics',
+                                email: 'elena@northstar.test',
+                                source: 'inbound_web',
+                                outcome: 'duplicate',
+                                reason: 'Email already exists in Leads.',
+                                lead_id: null,
+                                payload: null,
+                            },
+                        ],
+                    },
+                    status: 200,
+                    statusText: 'OK',
+                    headers: new AxiosHeaders(),
+                    config,
+                };
+            }
+
+            if (config.url === '/api/internal/crm/leads/import/commit') {
+                capturedCommitBody = JSON.parse(String(config.data ?? '{}')) as Record<string, unknown>;
+                return {
+                    data: {
+                        dry_run: false,
+                        total_rows: 1,
+                        ready_count: 0,
+                        inserted_count: 1,
+                        duplicate_count: 0,
+                        invalid_count: 0,
+                        rows: [
+                            {
+                                row_index: 1,
+                                full_name: 'Darius Patel',
+                                company_name: 'Nimbus Logistics',
+                                email: 'darius@nimbus.example',
+                                source: 'outbound',
+                                outcome: 'inserted',
+                                reason: null,
+                                lead_id: 'lead-imported-1',
+                                payload: null,
+                            },
+                        ],
+                    },
+                    status: 201,
+                    statusText: 'Created',
+                    headers: new AxiosHeaders(),
+                    config,
+                };
+            }
+
+            throw new Error(`Unexpected request: ${String(config.url)}`);
+        };
+
+        try {
+            const csvFile = new File(['First Name,Last Name,Email\nDarius,Patel,darius@nimbus.example\n'], 'leads.csv', {
+                type: 'text/csv',
+            });
+            if (fileInput) {
+                Object.defineProperty(fileInput, 'files', {
+                    value: [csvFile],
+                    configurable: true,
+                });
+                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            await flushPromises();
+            await nextTick();
+
+            // FormData interceptor overrides JSON Content-Type for multipart boundary upload
+            expect(capturedPreviewContentType).toBe('multipart/form-data');
+            expect(document.body.textContent).toContain('Darius Patel');
+            expect(document.body.textContent).toContain('Email already exists in Leads.');
+
+            // Uncheck row 2 ("Claire Moreau") and commit only row 1
+            const row2Checkbox = document.body.querySelector<HTMLInputElement>(
+                'input[type="checkbox"][aria-label="Select row 2: Claire Moreau"]',
+            );
+            expect(row2Checkbox).not.toBeNull();
+            row2Checkbox?.click();
+            await nextTick();
+
+            const confirmBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="confirm-import-leads"]');
+            expect(confirmBtn?.textContent).toContain('Approve & Import 1 Leads');
+            confirmBtn?.click();
+            await flushPromises();
+            await nextTick();
+
+            expect(capturedCommitBody).not.toBeNull();
+            const committedRows = (capturedCommitBody as unknown as { rows: Array<{ email: string }> }).rows;
+            expect(committedRows).toHaveLength(1);
+            expect(committedRows[0].email).toBe('darius@nimbus.example');
+            expect(document.body.querySelector('[data-testid="import-leads-success"]')).not.toBeNull();
+            expect(mockRouterReload).toHaveBeenCalledWith({ only: ['leads', 'statusCounts'] });
+        } finally {
+            crmHttpClient.defaults.adapter = originalAdapter;
         }
     });
 });

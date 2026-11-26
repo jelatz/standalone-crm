@@ -159,7 +159,7 @@ it('enforces Companies CRUD, validation, silo hierarchy, account manager assignm
             ->has('filterDefinitions', 1)
             ->has('assignableUsers', 1)
             ->where('assignableUsers.0.id', $repA->id)
-            ->has('lifecycleStages', 5));
+            ->has('lifecycleStages', 4));
 
     // Director A sees Rep A's Company AND both Director A + Rep A in assignableUsers (never Rep B)
     $this->actingAs($directorA)->get('/app/crm/companies')

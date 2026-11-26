@@ -183,7 +183,7 @@ function submitCreateUser(): void {
                     No users provisioned yet
                 </p>
                 <p class="text-[12px] text-secondary">
-                    Create an employee account to grant access to CRM pipelines and handoffs.
+                    Create an employee account to grant access to CRM leads, accounts, and pipelines.
                 </p>
                 <Button variant="primary" size="sm" @click="openCreateDialog">
                     Create User

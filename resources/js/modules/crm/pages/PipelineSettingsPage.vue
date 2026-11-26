@@ -270,10 +270,10 @@ async function handleDeleteStage(stageId: string): Promise<void> {
 // Custom Field Definitions Manager
 const entityFilter = ref<string>('all');
 const entityTypes: App.Modules.Crm.CustomFields.Enums.CustomFieldEntityTypeEnum[] = [
+    'lead',
     'company',
     'contact',
     'deal',
-    'project',
 ];
 const fieldTypes: App.Modules.Crm.CustomFields.Enums.CustomFieldTypeEnum[] = [
     'text',
