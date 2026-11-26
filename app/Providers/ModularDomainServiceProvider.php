@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Modules\Core\AsyncJobs\Models\AsyncJobRun;
 use App\Modules\Core\Attachments\Models\Attachment;
 use App\Modules\Core\Attachments\Policies\AttachmentPolicy;
+use App\Modules\Core\Rbac\Enums\RoleEnum;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\Team;
@@ -130,6 +131,13 @@ class ModularDomainServiceProvider extends ServiceProvider
             static fn (User $user): bool => $user->status === UserStatusEnum::Active
                 && $user->deleted_at === null
                 && $user->roles()->exists(),
+        );
+
+        Gate::define(
+            'admin.sops.manage',
+            static fn (User $user): bool => ! $user->trashed()
+                && $user->status === UserStatusEnum::Active
+                && $user->hasRole(RoleEnum::Superadmin->value),
         );
     }
 

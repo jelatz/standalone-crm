@@ -104,3 +104,4 @@ Use **1 neutral scale (Cool Zinc)**, **1 primary accent (Deep Cobalt)**, and sem
 - **Generated Lead Detail & Convert Lead Modal Screen:** `projects/17521671229474955745/screens/d17bb101fcab4fa9958b1c8139576c00`
 - **Generated CRM Overview Dashboard Screen:** `projects/17521671229474955745/screens/84cf40e58107492cb0b649e42d0673fe`
 - **Generated Import Leads Modal Screen:** `projects/17521671229474955745/screens/cd370eaa03b84dd392deb7e6557c1d4b`
+- **Generated Superadmin SOP Management Screen:** `projects/17521671229474955745/screens/0384b6981a0a457ba8fb8c591e99f3c1`

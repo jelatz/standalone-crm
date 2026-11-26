@@ -77,6 +77,45 @@ export type PermissionEnum = 'leads.view' | 'leads.create' | 'leads.update' | 'l
 export type RoleEnum = 'superadmin' | 'admin' | 'director' | 'operations_manager' | 'sales' | 'account_manager' | 'project_manager' | 'support' | 'it';
 }
 }
+namespace Sops {
+namespace Data {
+export type CreateSopData = {
+module: string,
+name: string,
+content: string | null,
+};
+export type SopDocumentData = {
+module: string,
+slug: string,
+filename: string,
+relative_path: string,
+title: string,
+size_bytes: number,
+updated_at: string,
+sha256: string,
+content: string,
+};
+export type SopModuleGroupData = {
+module: string,
+label: string,
+sops: App.Modules.Core.Sops.Data.SopSummaryData[],
+};
+export type SopSummaryData = {
+module: string,
+slug: string,
+filename: string,
+relative_path: string,
+title: string,
+size_bytes: number,
+updated_at: string,
+sha256: string,
+};
+export type UpdateSopData = {
+content: string | null,
+expected_sha256: string,
+};
+}
+}
 namespace Users {
 namespace Data {
 export type UserSummaryData = {

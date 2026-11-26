@@ -537,11 +537,11 @@ describe('CrmShellLayout & Core Pages', () => {
         expect(alertBanner.text()).toContain('These credentials do not match our records.');
     });
 
-    it('gates Admin Users link by admin.users and renders UsersPage with autocomplete="new-password" modal', async () => {
+    it('gates Admin Users and SOPs links by superadmin role and renders UsersPage with autocomplete="new-password" modal', async () => {
         const mockEcho = createMockEcho();
         setEchoInstanceForTesting(mockEcho.client);
 
-        // Standard user without admin.users must NOT see Users link
+        // Standard user without admin.users must NOT see Users or SOPs links
         const standardWrapper = mount(CrmShellLayout, {
             attachTo: document.body,
             slots: { default: () => h('div', 'Body') },
@@ -549,8 +549,26 @@ describe('CrmShellLayout & Core Pages', () => {
         mountedWrappers.push(standardWrapper);
         await nextTick();
         expect(standardWrapper.find('a[href="/app/admin/users"]').exists()).toBe(false);
+        expect(standardWrapper.find('a[href="/app/admin/sops"]').exists()).toBe(false);
 
-        // Superadmin with admin.users sees Admin -> Users nav link
+        // Regular admin (non-superadmin) must NOT see Admin Users or SOPs links
+        mockPage.props.auth = {
+            user: {
+                ...makeUser(),
+                roles: ['admin'],
+                permissions: ['admin.users'],
+            },
+        };
+        const adminWrapper = mount(CrmShellLayout, {
+            attachTo: document.body,
+            slots: { default: () => h('div', 'Body') },
+        });
+        mountedWrappers.push(adminWrapper);
+        await nextTick();
+        expect(adminWrapper.find('a[href="/app/admin/users"]').exists()).toBe(false);
+        expect(adminWrapper.find('a[href="/app/admin/sops"]').exists()).toBe(false);
+
+        // Superadmin with admin.users sees Admin -> Users and Admin -> SOPs nav links
         mockPage.props.auth = {
             user: {
                 ...makeUser(),
@@ -565,6 +583,7 @@ describe('CrmShellLayout & Core Pages', () => {
         mountedWrappers.push(superWrapper);
         await nextTick();
         expect(superWrapper.find('a[href="/app/admin/users"]').exists()).toBe(true);
+        expect(superWrapper.find('a[href="/app/admin/sops"]').exists()).toBe(true);
 
         const usersWrapper = mount(UsersPage, {
             attachTo: document.body,

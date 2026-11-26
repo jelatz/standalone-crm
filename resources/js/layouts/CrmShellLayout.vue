@@ -4,6 +4,7 @@ import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     Building2,
     Crosshair,
+    FileText,
     Kanban,
     LayoutDashboard,
     LogOut,
@@ -128,18 +129,30 @@ const visibleNavGroups = computed<NavGroup[]>(() => {
         },
     ];
 
-    if (authStore.hasRole('superadmin') && authStore.hasPermission('admin.users')) {
+    if (authStore.hasRole('superadmin')) {
+        const adminItems: NavItem[] = [];
+
+        if (authStore.hasPermission('admin.users')) {
+            adminItems.push({
+                key: 'admin.users',
+                label: 'Users',
+                href: '/app/admin/users',
+                icon: UserCog,
+                keywords: 'admin users accounts roles permissions superadmin',
+            });
+        }
+
+        adminItems.push({
+            key: 'admin.sops',
+            label: 'SOPs',
+            href: '/app/admin/sops',
+            icon: FileText,
+            keywords: 'admin sops playbooks standard operating procedures markdown context',
+        });
+
         groups.push({
             label: 'Admin',
-            items: [
-                {
-                    key: 'admin.users',
-                    label: 'Users',
-                    href: '/app/admin/users',
-                    icon: UserCog,
-                    keywords: 'admin users accounts roles permissions superadmin',
-                },
-            ],
+            items: adminItems,
         });
     }
 
