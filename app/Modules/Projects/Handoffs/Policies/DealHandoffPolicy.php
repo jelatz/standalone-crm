@@ -105,8 +105,17 @@ class DealHandoffPolicy
             return false;
         }
 
-        return $user->checkPermissionTo(PermissionEnum::HandoffsReview->value)
-            || $user->checkPermissionTo(PermissionEnum::HandoffsRequestInfo->value);
+        if (app(VisibleScopeResolver::class)->for($user)->isUnrestrictedAdmin) {
+            return $user->checkPermissionTo(PermissionEnum::HandoffsReview->value)
+                || $user->checkPermissionTo(PermissionEnum::HandoffsRequestInfo->value);
+        }
+
+        if ($user->checkPermissionTo(PermissionEnum::HandoffsReview->value)) {
+            return true;
+        }
+
+        return $user->checkPermissionTo(PermissionEnum::HandoffsRequestInfo->value)
+            && $this->view($user, $handoff);
     }
 
     public function reject(User $user, DealHandoff $handoff): bool
@@ -126,7 +135,9 @@ class DealHandoffPolicy
     protected function resolveDeal(DealHandoff $handoff): ?Deal
     {
         if ($handoff->relationLoaded('deal')) {
-            return $handoff->getRelation('deal');
+            $deal = $handoff->getRelation('deal');
+
+            return ($deal instanceof Deal && ! $deal->trashed()) ? $deal : null;
         }
 
         return Deal::query()->find($handoff->deal_id);

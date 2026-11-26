@@ -534,11 +534,13 @@ it('enforces TaskPolicy for project-bound tasks and standalone CRM tasks', funct
         ->and(Gate::forUser($pmA)->allows('update', $projectTask))->toBeTrue()
         ->and(Gate::forUser($pmA)->allows('move', $projectTask))->toBeTrue()
         ->and(Gate::forUser($pmA)->allows('delete', $projectTask))->toBeTrue()
+        ->and(Gate::forUser($pmA)->allows('create', [Task::class, $projectTask]))->toBeTrue()
         ->and(Gate::forUser($directorA)->allows('view', $projectTask))->toBeTrue()
         ->and(Gate::forUser($directorA)->allows('update', $projectTask))->toBeTrue()
         ->and(Gate::forUser($supportUser)->allows('view', $projectTask))->toBeTrue()
         ->and(Gate::forUser($supportUser)->allows('update', $projectTask))->toBeTrue()
         ->and(Gate::forUser($supportUser)->allows('move', $projectTask))->toBeTrue()
+        ->and(Gate::forUser($supportUser)->allows('delete', $projectTask))->toBeFalse() // Mere assignee/Viewer cannot delete
         ->and(Gate::forUser($supportUser)->allows('toggleWatcher', $projectTask))->toBeTrue()
         ->and(Gate::forUser($repA)->allows('view', $projectTask))->toBeFalse() // Project-bound task does not leak via linkable Deal
         ->and(Gate::forUser($pmB)->allows('view', $projectTask))->toBeFalse()
@@ -583,7 +585,7 @@ it('enforces TaskPolicy for project-bound tasks and standalone CRM tasks', funct
         ->and(Gate::forUser($directorB)->allows('delete', $standaloneTask))->toBeTrue()
         ->and(Gate::forUser($pmA)->allows('view', $standaloneTask))->toBeTrue()
         ->and(Gate::forUser($pmA)->allows('update', $standaloneTask))->toBeTrue()
-        ->and(Gate::forUser($pmA)->allows('delete', $standaloneTask))->toBeTrue()
+        ->and(Gate::forUser($pmA)->allows('delete', $standaloneTask))->toBeFalse() // Non-creator assignee cannot delete
         ->and(Gate::forUser($repA)->allows('view', $standaloneTask))->toBeTrue()
         ->and(Gate::forUser($repA)->allows('toggleWatcher', $standaloneTask))->toBeTrue()
         ->and(Gate::forUser($repA)->allows('update', $standaloneTask))->toBeFalse() // Sales lacks tasks.update
@@ -596,6 +598,20 @@ it('enforces TaskPolicy for project-bound tasks and standalone CRM tasks', funct
         ->and(Gate::forUser($repB)->allows('update', $standaloneTask))->toBeFalse()
         ->and(Gate::forUser($pmB)->allows('view', $standaloneTask))->toBeFalse()
         ->and(Gate::forUser($pmB)->allows('update', $standaloneTask))->toBeFalse();
+
+    // Standalone subtask inherits parent visibility fallback without duplicating linkable/watchers
+    $standaloneSubtask = Task::query()->create([
+        'project_id' => null,
+        'parent_task_id' => $standaloneTask->id,
+        'creator_id' => $directorA->id,
+        'assignee_id' => null,
+        'title' => 'Draft redlines for legal',
+    ]);
+    expect(Gate::forUser($watcherUser)->allows('view', $standaloneSubtask))->toBeTrue()
+        ->and(Gate::forUser($pmA)->allows('view', $standaloneSubtask))->toBeTrue()
+        ->and(Gate::forUser($repA)->allows('view', $standaloneSubtask))->toBeTrue()
+        ->and(Gate::forUser($repB)->allows('view', $standaloneSubtask))->toBeFalse()
+        ->and(Gate::forUser($pmB)->allows('view', $standaloneSubtask))->toBeFalse();
 
     // Personal task without project_id or linkable is private to creator/assignee/watcher/admins
     $personalTask = Task::query()->create([
@@ -617,17 +633,29 @@ it('enforces TaskPolicy for project-bound tasks and standalone CRM tasks', funct
         ->and(Gate::forUser($pmA)->allows('view', $standaloneTask))->toBeTrue()
         ->and(Gate::forUser($watcherUser)->allows('view', $standaloneTask))->toBeTrue();
 
-    // Soft-deleting parent Project denies non-admin on projectTask while unrestricted admin retains access
+    // Soft-deleting parent Project denies non-admin on projectTask while unrestricted admin retains access,
+    // and rejects creating subtasks under a task whose Project is trashed
     $project->delete();
     expect(Gate::forUser($pmA)->allows('view', $projectTask->fresh()))->toBeFalse()
         ->and(Gate::forUser($pmA)->allows('update', $projectTask->fresh()))->toBeFalse()
         ->and(Gate::forUser($admin)->allows('view', $projectTask->fresh()))->toBeTrue()
         ->and(Gate::forUser($superadmin)->allows('delete', $projectTask->fresh()))->toBeTrue()
-        ->and(Gate::forUser($admin)->allows('create', [Task::class, $project]))->toBeFalse();
+        ->and(Gate::forUser($admin)->allows('create', [Task::class, $project]))->toBeFalse()
+        ->and(Gate::forUser($admin)->allows('create', [Task::class, $projectTask->fresh()]))->toBeFalse();
+
+    // Soft-deleting parent task fails closed on active subtask across view/update/move/delete/toggleWatcher/create
+    $standaloneTask->delete();
+    foreach ([$directorA, $pmA, $watcherUser, $admin, $superadmin] as $viewer) {
+        expect(Gate::forUser($viewer)->allows('view', $standaloneSubtask->fresh()))->toBeFalse()
+            ->and(Gate::forUser($viewer)->allows('update', $standaloneSubtask->fresh()))->toBeFalse()
+            ->and(Gate::forUser($viewer)->allows('move', $standaloneSubtask->fresh()))->toBeFalse()
+            ->and(Gate::forUser($viewer)->allows('delete', $standaloneSubtask->fresh()))->toBeFalse()
+            ->and(Gate::forUser($viewer)->allows('toggleWatcher', $standaloneSubtask->fresh()))->toBeFalse();
+    }
+    expect(Gate::forUser($admin)->allows('create', [Task::class, $standaloneTask->fresh()]))->toBeFalse();
 
     // Unpersisted and trashed tasks fail closed even for Superadmin/Admin
     expect(Gate::forUser($superadmin)->allows('view', new Task))->toBeFalse();
-    $standaloneTask->delete();
     expect(Gate::forUser($superadmin)->allows('view', $standaloneTask))->toBeFalse()
         ->and(Gate::forUser($admin)->allows('update', $standaloneTask))->toBeFalse()
         ->and(Gate::forUser($directorA)->allows('delete', $standaloneTask))->toBeFalse();
@@ -719,11 +747,11 @@ it('enforces DealHandoffPolicy and ProjectTemplatePolicy across all workflow act
         ->and(Gate::forUser($opsMgr)->allows('resubmit', $handoff))->toBeFalse()
         ->and(Gate::forUser($pm)->allows('resubmit', $handoff))->toBeFalse();
 
-    // Request Changes
+    // Request Changes: review-role/Admin/Superadmin or assigned PM (NOT cross-silo pmOther!)
     foreach ([$superadmin, $admin, $opsMgr, $directorA, $pm] as $requester) {
         expect(Gate::forUser($requester)->allows('requestChanges', $handoff))->toBeTrue();
     }
-    foreach ([$repA, $am, $support] as $deniedRequester) {
+    foreach ([$pmOther, $repA, $repB, $am, $support] as $deniedRequester) {
         expect(Gate::forUser($deniedRequester)->allows('requestChanges', $handoff))->toBeFalse();
     }
 
@@ -739,6 +767,9 @@ it('enforces DealHandoffPolicy and ProjectTemplatePolicy across all workflow act
 
     // Unpersisted handoff/template and soft-deleted deal fail closed
     expect(Gate::forUser($superadmin)->allows('view', new DealHandoff))->toBeFalse()
+        ->and(Gate::forUser($superadmin)->allows('resubmit', new DealHandoff))->toBeFalse()
+        ->and(Gate::forUser($superadmin)->allows('requestChanges', new DealHandoff))->toBeFalse()
+        ->and(Gate::forUser($superadmin)->allows('reject', new DealHandoff))->toBeFalse()
         ->and(Gate::forUser($superadmin)->allows('approve', new DealHandoff))->toBeFalse()
         ->and(Gate::forUser($superadmin)->allows('view', new ProjectTemplate))->toBeFalse();
 

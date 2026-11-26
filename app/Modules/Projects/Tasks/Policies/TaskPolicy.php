@@ -36,18 +36,69 @@ class TaskPolicy
             return false;
         }
 
+        if ($target instanceof Task) {
+            if ($target->parent_task_id !== null && $this->resolveParentTask($target) === null) {
+                return false;
+            }
+
+            if ($target->project_id !== null && $this->resolveProject($target) === null) {
+                return false;
+            }
+        }
+
         return Gate::forUser($user)->allows('update', $target);
     }
 
     public function view(User $user, Task $task): bool
     {
+        return $this->authorizeView($user, $task);
+    }
+
+    public function update(User $user, Task $task): bool
+    {
+        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksUpdate, allowAssignee: true);
+    }
+
+    public function move(User $user, Task $task): bool
+    {
+        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksUpdate, allowAssignee: true);
+    }
+
+    public function delete(User $user, Task $task): bool
+    {
+        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksDelete, allowAssignee: false);
+    }
+
+    public function toggleWatcher(User $user, Task $task): bool
+    {
+        return $this->view($user, $task);
+    }
+
+    /**
+     * @param  list<string>  $visitedTaskIds
+     */
+    protected function authorizeView(User $user, Task $task, array $visitedTaskIds = []): bool
+    {
+        $taskId = (string) $task->getKey();
+
         if (
             ! $task->exists
             || $task->trashed()
+            || $taskId === ''
+            || in_array($taskId, $visitedTaskIds, true)
             || ! $this->isActiveEmployee($user)
             || ! $user->checkPermissionTo(PermissionEnum::TasksView->value)
         ) {
             return false;
+        }
+
+        $parent = null;
+        if ($task->parent_task_id !== null) {
+            $parent = $this->resolveParentTask($task);
+
+            if ($parent === null) {
+                return false;
+            }
         }
 
         if (app(VisibleScopeResolver::class)->for($user)->isUnrestrictedAdmin) {
@@ -60,43 +111,39 @@ class TaskPolicy
             return $project !== null && Gate::forUser($user)->allows('view', $project);
         }
 
-        if ($this->isCreatorOrAssignee($user, $task) || $this->isWatcher($user, $task)) {
+        if ($this->isCreatorOrAssignee($user, $task, includeAssignee: true) || $this->isWatcher($user, $task)) {
             return true;
         }
 
         $linkable = $this->resolveLinkable($task);
 
-        return $linkable !== null && Gate::forUser($user)->allows('view', $linkable);
+        if ($linkable !== null && Gate::forUser($user)->allows('view', $linkable)) {
+            return true;
+        }
+
+        if ($parent !== null) {
+            return $this->authorizeView($user, $parent, [...$visitedTaskIds, $taskId]);
+        }
+
+        return false;
     }
 
-    public function update(User $user, Task $task): bool
-    {
-        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksUpdate);
-    }
-
-    public function move(User $user, Task $task): bool
-    {
-        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksUpdate);
-    }
-
-    public function delete(User $user, Task $task): bool
-    {
-        return $this->authorizeTaskMutation($user, $task, PermissionEnum::TasksDelete);
-    }
-
-    public function toggleWatcher(User $user, Task $task): bool
-    {
-        return $this->view($user, $task);
-    }
-
-    protected function authorizeTaskMutation(User $user, Task $task, PermissionEnum $permission): bool
-    {
+    protected function authorizeTaskMutation(
+        User $user,
+        Task $task,
+        PermissionEnum $permission,
+        bool $allowAssignee,
+    ): bool {
         if (
             ! $task->exists
             || $task->trashed()
             || ! $this->isActiveEmployee($user)
             || ! $user->checkPermissionTo($permission->value)
         ) {
+            return false;
+        }
+
+        if ($task->parent_task_id !== null && $this->resolveParentTask($task) === null) {
             return false;
         }
 
@@ -111,14 +158,14 @@ class TaskPolicy
                 return false;
             }
 
-            if ($this->isCreatorOrAssignee($user, $task)) {
+            if ($this->isCreatorOrAssignee($user, $task, includeAssignee: $allowAssignee)) {
                 return true;
             }
 
             return Gate::forUser($user)->allows('update', $project);
         }
 
-        if ($this->isCreatorOrAssignee($user, $task)) {
+        if ($this->isCreatorOrAssignee($user, $task, includeAssignee: $allowAssignee)) {
             return true;
         }
 
@@ -127,15 +174,45 @@ class TaskPolicy
         return $linkable !== null && Gate::forUser($user)->allows('update', $linkable);
     }
 
-    protected function isCreatorOrAssignee(User $user, Task $task): bool
+    protected function isCreatorOrAssignee(User $user, Task $task, bool $includeAssignee): bool
     {
-        return (string) $task->creator_id === (string) $user->id
-            || ($task->assignee_id !== null && (string) $task->assignee_id === (string) $user->id);
+        if ((string) $task->creator_id === (string) $user->id) {
+            return true;
+        }
+
+        return $includeAssignee
+            && $task->assignee_id !== null
+            && (string) $task->assignee_id === (string) $user->id;
     }
 
     protected function isWatcher(User $user, Task $task): bool
     {
         return $task->watchers()->where('users.id', $user->id)->exists();
+    }
+
+    protected function resolveParentTask(Task $task): ?Task
+    {
+        if ($task->parent_task_id === null) {
+            return null;
+        }
+
+        if ($task->relationLoaded('parent')) {
+            $parent = $task->getRelation('parent');
+
+            if ($parent instanceof Task && $parent->trashed()) {
+                return null;
+            }
+
+            return $parent instanceof Task ? $parent : null;
+        }
+
+        $parent = Task::withTrashed()->find($task->parent_task_id);
+
+        if ($parent === null || $parent->trashed()) {
+            return null;
+        }
+
+        return $parent;
     }
 
     protected function resolveProject(Task $task): ?Project
