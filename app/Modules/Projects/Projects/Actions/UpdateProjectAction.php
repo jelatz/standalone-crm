@@ -94,22 +94,22 @@ class UpdateProjectAction
                     ? trim($data->company_id)
                     : null;
 
+                if ($candidateCompanyId !== $nextCompanyId && $nextCompanyId !== null) {
+                    $existingCompany = Company::query()->find($nextCompanyId);
+                    if ($existingCompany === null || ! Gate::forUser($actor)->allows('view', $existingCompany)) {
+                        throw new AuthorizationException('You are not authorized to unlink or replace an inaccessible company on this project.');
+                    }
+                }
+
+                if ($candidateCompanyId !== null) {
+                    $companyVisible = Gate::forUser($actor)->allows('viewAny', Company::class)
+                        && Company::query()->visibleTo($actor)->whereKey($candidateCompanyId)->exists();
+                    if (! $companyVisible) {
+                        throw new AuthorizationException('You are not authorized to link this project to the selected company.');
+                    }
+                }
+
                 if ($candidateCompanyId !== $nextCompanyId) {
-                    if ($nextCompanyId !== null) {
-                        $existingCompany = Company::query()->find($nextCompanyId);
-                        if ($existingCompany === null || ! Gate::forUser($actor)->allows('view', $existingCompany)) {
-                            throw new AuthorizationException('You are not authorized to unlink or replace an inaccessible company on this project.');
-                        }
-                    }
-
-                    if ($candidateCompanyId !== null) {
-                        $companyVisible = Gate::forUser($actor)->allows('viewAny', Company::class)
-                            && Company::query()->visibleTo($actor)->whereKey($candidateCompanyId)->exists();
-                        if (! $companyVisible) {
-                            throw new AuthorizationException('You are not authorized to link this project to the selected company.');
-                        }
-                    }
-
                     $attributes['company_id'] = $candidateCompanyId;
                     $changedFields[] = 'company_id';
                     $nextCompanyId = $candidateCompanyId;
@@ -122,21 +122,23 @@ class UpdateProjectAction
                     ? trim($data->primary_deal_id)
                     : null;
 
-                if ($candidateDealId !== $nextPrimaryDealId) {
-                    if ($nextPrimaryDealId !== null) {
-                        $existingDeal = Deal::query()->find($nextPrimaryDealId);
-                        if ($existingDeal === null || ! Gate::forUser($actor)->allows('view', $existingDeal)) {
-                            throw new AuthorizationException('You are not authorized to unlink or replace an inaccessible deal on this project.');
-                        }
+                if ($candidateDealId !== $nextPrimaryDealId && $nextPrimaryDealId !== null) {
+                    $existingDeal = Deal::query()->find($nextPrimaryDealId);
+                    if ($existingDeal === null || ! Gate::forUser($actor)->allows('view', $existingDeal)) {
+                        throw new AuthorizationException('You are not authorized to unlink or replace an inaccessible deal on this project.');
                     }
+                }
 
+                if ($candidateDealId !== null) {
+                    $dealVisible = Gate::forUser($actor)->allows('viewAny', Deal::class)
+                        && Deal::query()->visibleTo($actor)->whereKey($candidateDealId)->exists();
+                    if (! $dealVisible) {
+                        throw new AuthorizationException('You are not authorized to link this project to the selected deal.');
+                    }
+                }
+
+                if ($candidateDealId !== $nextPrimaryDealId) {
                     if ($candidateDealId !== null) {
-                        $dealVisible = Gate::forUser($actor)->allows('viewAny', Deal::class)
-                            && Deal::query()->visibleTo($actor)->whereKey($candidateDealId)->exists();
-                        if (! $dealVisible) {
-                            throw new AuthorizationException('You are not authorized to link this project to the selected deal.');
-                        }
-
                         DB::table('deal_project')->insertOrIgnore([
                             'deal_id' => $candidateDealId,
                             'project_id' => (string) $lockedProject->id,

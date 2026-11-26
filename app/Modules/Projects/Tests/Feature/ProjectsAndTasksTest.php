@@ -95,6 +95,14 @@ it('enforces manual Project CRUD, filters without company oracle, stage manageme
     $dealStage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
 
     $companyA = Company::query()->create(['name' => 'Alpha Manufacturing', 'owner_id' => $pmA->id]);
+    $dealA = Deal::query()->create([
+        'company_id' => $companyA->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $dealStage->id,
+        'owner_id' => $pmA->id,
+        'title' => 'Alpha Deal',
+        'stage_entered_at' => now(),
+    ]);
     $companyB = Company::query()->create(['name' => 'Secret Sales Co', 'owner_id' => $repA->id]);
     $dealB = Deal::query()->create([
         'company_id' => $companyB->id,
@@ -133,6 +141,7 @@ it('enforces manual Project CRUD, filters without company oracle, stage manageme
     $createRes = $this->actingAs($pmA)->postJson('/api/internal/projects', [
         'name' => 'Alpha ERP Cutover',
         'company_id' => $companyA->id,
+        'primary_deal_id' => $dealA->id,
         'account_manager_id' => $amUser->id,
         'status' => ProjectStatusEnum::Active->value,
         'health' => ProjectHealthEnum::OnTrack->value,
@@ -304,6 +313,9 @@ it('enforces manual Project CRUD, filters without company oracle, stage manageme
             ->where('project.company_id', null)
             ->where('project.company_name', null)
             ->where('project.has_masked_company', true)
+            ->where('project.primary_deal_id', null)
+            ->where('project.primary_deal_title', null)
+            ->where('project.has_masked_deal', true)
             ->where('can.update', false));
 
     // Upgrade PM B to Editor -> can update project, still cannot manage collaborators or delete
@@ -313,7 +325,33 @@ it('enforces manual Project CRUD, filters without company oracle, stage manageme
         'role_label' => CollaboratorRoleLabel::ProjectManager->value,
     ])->assertCreated();
 
-    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['name' => 'Alpha ERP Phase 1'])->assertOk();
+    // Masked company_id / primary_deal_id membership oracle protection:
+    // submitting hidden company_id / primary_deal_id unchanged, another out-of-silo UUID, nonexistent UUID, or null MUST return 403
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['company_id' => $companyA->id])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['company_id' => $companyB->id])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['company_id' => (string) Str::uuid7()])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['company_id' => null])->assertForbidden();
+
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['primary_deal_id' => $dealA->id])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['primary_deal_id' => $dealB->id])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['primary_deal_id' => (string) Str::uuid7()])->assertForbidden();
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", ['primary_deal_id' => null])->assertForbidden();
+
+    // Updating name/status/health WITHOUT sending company_id/primary_deal_id succeeds (200) and preserves masked links
+    $this->actingAs($pmB)->patchJson("/api/internal/projects/{$projectId}", [
+        'name' => 'Alpha ERP Phase 1',
+        'status' => ProjectStatusEnum::Active->value,
+        'health' => ProjectHealthEnum::AtRisk->value,
+    ])->assertOk()
+        ->assertJsonPath('name', 'Alpha ERP Phase 1')
+        ->assertJsonPath('company_id', null)
+        ->assertJsonPath('has_masked_company', true)
+        ->assertJsonPath('primary_deal_id', null)
+        ->assertJsonPath('has_masked_deal', true);
+
+    expect($project->fresh()->company_id)->toBe($companyA->id)
+        ->and($project->fresh()->primary_deal_id)->toBe($dealA->id);
+
     $this->actingAs($pmB)->deleteJson("/api/internal/projects/{$projectId}")->assertForbidden();
 
     // Revoke PM B -> denied again
