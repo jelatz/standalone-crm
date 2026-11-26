@@ -4,10 +4,11 @@ import { AlertCircle, Plus, Trash2, Users } from 'lucide-vue-next';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import { crmApi } from '@/modules/crm/api/crmApi';
+import { projectsApi } from '@/modules/projects/api/projectsApi';
 import { formatEnumLabel } from '@/modules/crm/utils/formatters';
 
 const props = defineProps<{
-    entityType: 'company' | 'contact' | 'deal';
+    entityType: 'company' | 'contact' | 'deal' | 'project';
     entityId: string;
     collaborators: App.Modules.Core.Rbac.Data.EntityCollaboratorData[];
     assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[];
@@ -51,11 +52,15 @@ async function handleGrant(): Promise<void> {
     errorMessage.value = '';
 
     try {
-        const granted = await crmApi.grantCollaborator(props.entityType, props.entityId, {
+        const grantPayload = {
             user_id: selectedUserId.value,
             access_level: selectedAccessLevel.value as App.Modules.Core.Rbac.Enums.CollaboratorAccessLevel,
             role_label: selectedRoleLabel.value as App.Modules.Core.Rbac.Enums.CollaboratorRoleLabel,
-        });
+        };
+        const granted =
+            props.entityType === 'project'
+                ? await projectsApi.grantProjectCollaborator(props.entityId, grantPayload)
+                : await crmApi.grantCollaborator(props.entityType, props.entityId, grantPayload);
 
         const existingIndex = items.value.findIndex((c) => c.user_id === granted.user_id);
         if (existingIndex >= 0) {
@@ -84,7 +89,11 @@ async function handleRevoke(userId: string): Promise<void> {
     errorMessage.value = '';
 
     try {
-        await crmApi.revokeCollaborator(props.entityType, props.entityId, userId);
+        if (props.entityType === 'project') {
+            await projectsApi.revokeProjectCollaborator(props.entityId, userId);
+        } else {
+            await crmApi.revokeCollaborator(props.entityType, props.entityId, userId);
+        }
         items.value = items.value.filter((c) => c.user_id !== userId);
     } catch (error) {
         errorMessage.value =

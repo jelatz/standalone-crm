@@ -44,6 +44,7 @@ const props = defineProps<{
     filterDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
     customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[];
     assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[];
+    assignableAms?: App.Modules.Core.Users.Data.UserSummaryData[];
     companies: Array<{
         id: string;
         name: string;
@@ -57,6 +58,7 @@ const props = defineProps<{
     }>;
     can: {
         create: boolean;
+        submitHandoff?: boolean;
     };
 }>();
 
@@ -69,6 +71,11 @@ const canMoveDeals = computed(() =>
 );
 const canOverrideGates = computed(() =>
     activeUser.value ? activeUser.value.permissions.includes('deals.override_gates') : false,
+);
+const canSubmitHandoff = computed(
+    () =>
+        props.can.submitHandoff ??
+        (activeUser.value ? activeUser.value.permissions.includes('handoffs.submit') : false),
 );
 
 const instanceId = useId();
@@ -634,9 +641,11 @@ async function handleCreateSubmit(): Promise<void> {
             :board="props.board"
             :custom-field-definitions="props.customFieldDefinitions"
             :assignable-users="props.assignableUsers"
+            :assignable-ams="props.assignableAms ?? props.assignableUsers"
             :contacts="props.contacts"
             :can-move-deals="canMoveDeals"
             :can-override-gates="canOverrideGates"
+            :can-submit-handoff="canSubmitHandoff"
         />
 
         <!-- Table View -->

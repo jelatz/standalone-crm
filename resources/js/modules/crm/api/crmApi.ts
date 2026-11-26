@@ -229,7 +229,7 @@ async function requestData<T>(fn: () => Promise<{ data: T }>): Promise<T> {
 }
 
 export interface TimelineQueryParams {
-    linkable_type: 'company' | 'contact' | 'deal';
+    linkable_type: 'company' | 'contact' | 'deal' | 'project';
     linkable_id: string;
     cursor?: string | null;
     limit?: number;

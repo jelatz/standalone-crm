@@ -23,7 +23,7 @@ type TimelineFilter = 'all' | 'notes' | 'stages' | 'fields' | 'tasks' | 'messagi
 
 const props = withDefaults(
     defineProps<{
-        linkableType: 'company' | 'contact' | 'deal';
+        linkableType: 'company' | 'contact' | 'deal' | 'project';
         linkableId: string;
         initialPage: App.Modules.Crm.Timeline.Data.TimelinePageData;
         canCreateNote?: boolean;

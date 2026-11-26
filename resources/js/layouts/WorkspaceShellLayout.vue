@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vu
 import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     Building2,
+    CheckSquare,
     ChevronDown,
     ChevronUp,
     ClipboardCheck,
@@ -37,6 +38,12 @@ import { useUnreadsStore, type UnreadChannel } from '@/stores/unreads.store';
 interface WorkspacePageProps {
     auth?: {
         user?: App.Modules.Core.Auth.Data.AuthenticatedUserData | null;
+    };
+    unreadCounts?: {
+        handoffs?: number;
+        chat?: number;
+        sharedInbox?: number;
+        notifications?: number;
     };
     moduleTitle?: string;
     [key: string]: unknown;
@@ -123,6 +130,13 @@ const navGroups = computed<NavGroup[]>(() => [
         label: 'Delivery',
         items: [
             {
+                key: 'projects.my_work',
+                label: 'My Work',
+                href: '/app/my-work',
+                icon: CheckSquare,
+                keywords: 'my work tasks overdue today todo checklist',
+            },
+            {
                 key: 'projects.handoffs',
                 label: 'Handoff Intake',
                 href: '/app/projects/handoffs',
@@ -203,6 +217,34 @@ watch(
         realtimeStore.connectForUser(nextUser?.id ?? null);
     },
     { immediate: true },
+);
+
+watch(
+    () => page.props?.unreadCounts,
+    (nextCounts) => {
+        if (!nextCounts || typeof nextCounts !== 'object') {
+            return;
+        }
+
+        const updates: Partial<Record<UnreadChannel, number>> = {};
+        if (typeof nextCounts.handoffs === 'number') {
+            updates.handoffs = nextCounts.handoffs;
+        }
+        if (typeof nextCounts.chat === 'number') {
+            updates.chat = nextCounts.chat;
+        }
+        if (typeof nextCounts.sharedInbox === 'number') {
+            updates.sharedInbox = nextCounts.sharedInbox;
+        }
+        if (typeof nextCounts.notifications === 'number') {
+            updates.notifications = nextCounts.notifications;
+        }
+
+        if (Object.keys(updates).length > 0) {
+            unreadsStore.setCounts(updates);
+        }
+    },
+    { deep: true, immediate: true },
 );
 
 watch(

@@ -1,5 +1,8 @@
 <?php
 
+use App\Modules\Core\Rbac\Actions\GrantEntityCollaboratorAction;
+use App\Modules\Core\Rbac\Enums\CollaboratorAccessLevel;
+use App\Modules\Core\Rbac\Enums\CollaboratorRoleLabel;
 use App\Modules\Core\Rbac\Enums\RoleEnum;
 use App\Modules\Core\Users\Actions\RebuildUserHierarchyClosureAction;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
@@ -684,4 +687,71 @@ it('enforces RBAC permissions, cross-silo IDOR isolation, Inertia pages, templat
             'assigned_pm_id' => $pmAssigned->id,
         ])->assertForbidden();
     }
+});
+
+it('exposes activeHandoff and can.submitHandoff on DealDetailPage while masking handoffs for roles lacking handoffs.view', function (): void {
+    $dept = Department::query()->create(['name' => 'Revenue', 'slug' => 'handoff-deal-props']);
+
+    $rep = createHandoffWorkflowUser($dept, 'EMP-DP-REP', 'rep.dp@acme.internal', RoleEnum::Sales);
+    $opsMgr = createHandoffWorkflowUser($dept, 'EMP-DP-OPS', 'ops.dp@acme.internal', RoleEnum::OperationsManager);
+    $support = createHandoffWorkflowUser($dept, 'EMP-DP-SUP', 'sup.dp@acme.internal', RoleEnum::Support);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $wonStage = $pipeline->stages()->where('stage_type', PipelineStageTypeEnum::Won->value)->firstOrFail();
+    [, $wonDeal] = createDealForHandoff($rep, $pipeline, $wonStage, 'Pacific Meridian Deal');
+
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $wonDeal,
+        user: $support,
+        accessLevel: CollaboratorAccessLevel::Viewer,
+        roleLabel: CollaboratorRoleLabel::SupportLead,
+        grantedBy: $rep,
+    );
+
+    // Before submission: activeHandoff is null, Sales can submit
+    $this->actingAs($rep)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/DealDetailPage')
+            ->where('activeHandoff', null)
+            ->where('can.submitHandoff', true));
+
+    // After submission: activeHandoff populated for Sales & OpsMgr, null for Support
+    $handoffId = $this->actingAs($rep)
+        ->postJson("/api/internal/crm/deals/{$wonDeal->id}/handoffs", [
+            'scope_notes_json' => validScopeNotes('Initial rollout scope'),
+            'handoff_checklist' => [['label' => 'Signed SOW', 'checked' => true]],
+        ])
+        ->assertCreated()
+        ->json('id');
+
+    $this->actingAs($rep)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('activeHandoff.id', $handoffId)
+            ->where('activeHandoff.status', DealHandoffStatusEnum::PendingReview->value)
+            ->where('can.submitHandoff', true));
+
+    $this->actingAs($support)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('activeHandoff', null)
+            ->where('can.submitHandoff', false));
+
+    // After rejection: activeHandoff resets to null so Sales can submit a fresh handoff
+    $this->actingAs($opsMgr)
+        ->postJson("/api/internal/handoffs/{$handoffId}/reject", [
+            'review_feedback' => 'Rescope before resubmitting.',
+        ])
+        ->assertOk();
+
+    $this->actingAs($rep)
+        ->get("/app/crm/deals/{$wonDeal->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('activeHandoff', null)
+            ->where('can.submitHandoff', true));
 });

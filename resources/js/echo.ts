@@ -4,6 +4,12 @@ import Pusher from 'pusher-js';
 export type RealtimeConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 export type ReverbEchoInstance = Echo<'reverb'>;
 
+export interface RealtimePresenceMember {
+    id: string;
+    name?: string;
+    [key: string]: unknown;
+}
+
 export interface RealtimeChannelLike {
     listen(event: string, callback: CallableFunction): this;
     stopListening(event: string, callback?: CallableFunction): this;
@@ -11,8 +17,15 @@ export interface RealtimeChannelLike {
     error(callback: CallableFunction): this;
 }
 
+export interface RealtimePresenceChannelLike extends RealtimeChannelLike {
+    here(callback: CallableFunction): this;
+    joining(callback: CallableFunction): this;
+    leaving(callback: CallableFunction): this;
+}
+
 export interface RealtimeEchoClient {
     private(channel: string): RealtimeChannelLike;
+    join?(channel: string): RealtimePresenceChannelLike;
     leave(channel: string): void;
     connectionStatus(): ConnectionStatus;
     disconnect(): void;

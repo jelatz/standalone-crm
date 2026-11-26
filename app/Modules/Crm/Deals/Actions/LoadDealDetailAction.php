@@ -11,6 +11,10 @@ use App\Modules\Crm\Deals\Models\Deal;
 use App\Modules\Crm\Pipelines\Data\PipelineData;
 use App\Modules\Crm\Shared\Actions\LoadEntityContextAction;
 use App\Modules\Crm\Timeline\Actions\QueryEntityTimelineAction;
+use App\Modules\Projects\Handoffs\Data\DealHandoffSummaryData;
+use App\Modules\Projects\Handoffs\Enums\DealHandoffStatusEnum;
+use App\Modules\Projects\Handoffs\Models\DealHandoff;
+use App\Modules\Projects\Handoffs\Support\DealHandoffQuerySupport;
 use Illuminate\Support\Facades\Gate;
 
 class LoadDealDetailAction
@@ -19,6 +23,7 @@ class LoadDealDetailAction
         protected QueryEntityTimelineAction $queryTimeline,
         protected LoadEntityContextAction $entityContext,
         protected LoadDealContextAction $dealContext,
+        protected DealHandoffQuerySupport $handoffQuerySupport,
     ) {}
 
     /**
@@ -77,7 +82,21 @@ class LoadDealDetailAction
 
         $canUpdate = Gate::forUser($viewer)->allows('update', $deal);
         $canManageCollaborators = Gate::forUser($viewer)->allows('manageCollaborators', $deal);
+        $canSubmitHandoff = Gate::forUser($viewer)->allows('submit', [DealHandoff::class, $deal]);
         $collaboratorOptions = $this->entityContext->collaboratorOptions();
+
+        $activeHandoffModel = DealHandoff::query()
+            ->where('deal_id', $deal->id)
+            ->where('status', '!=', DealHandoffStatusEnum::Rejected->value)
+            ->with(DealHandoffQuerySupport::eagerLoadRelations())
+            ->orderByDesc('submitted_at')
+            ->orderByDesc('id')
+            ->first();
+
+        $activeHandoff = $activeHandoffModel !== null
+            && Gate::forUser($viewer)->allows('view', $activeHandoffModel)
+            ? DealHandoffSummaryData::fromModel($activeHandoffModel)
+            : null;
 
         return [
             'deal' => DealDetailData::fromModel($deal, $canViewCompany, $canViewPrimaryContact),
@@ -90,6 +109,8 @@ class LoadDealDetailAction
             'customFieldDefinitions' => $this->dealContext->dealCustomFieldDefinitions((string) $deal->pipeline_id),
             'timeline' => $this->queryTimeline->execute($viewer, 'deal', (string) $deal->id, null, 25),
             'assignableUsers' => $this->entityContext->assignableUsers($viewer, includeAllActive: $canManageCollaborators),
+            'assignableAms' => $canSubmitHandoff ? $this->handoffQuerySupport->assignableAmsForViewer($viewer) : [],
+            'activeHandoff' => $activeHandoff,
             'companies' => $canUpdate ? $this->entityContext->visibleCompanySummaries($viewer) : [],
             'contacts' => $canUpdate ? $this->dealContext->visibleContactSummaries($viewer) : [],
             'stakeholderRoles' => array_map(
@@ -104,6 +125,7 @@ class LoadDealDetailAction
                 'moveStage' => Gate::forUser($viewer)->allows('moveStage', $deal),
                 'overrideGates' => Gate::forUser($viewer)->allows('overrideGates', $deal),
                 'manageCollaborators' => $canManageCollaborators,
+                'submitHandoff' => $canSubmitHandoff,
             ],
         ];
     }

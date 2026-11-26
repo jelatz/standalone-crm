@@ -28,6 +28,8 @@ const props = withDefaults(
         submitLabel?: string;
         allowPin?: boolean;
         initialPinned?: boolean;
+        hideFooter?: boolean;
+        initialDocument?: ProseMirrorDoc | null;
         resetKey?: number;
     }>(),
     {
@@ -38,12 +40,15 @@ const props = withDefaults(
         submitLabel: 'Save note',
         allowPin: true,
         initialPinned: false,
+        hideFooter: false,
+        initialDocument: null,
         resetKey: 0,
     },
 );
 
 const emit = defineEmits<{
     submit: [payload: { body_json: ProseMirrorDoc; is_pinned: boolean }];
+    'update:document': [doc: ProseMirrorDoc];
 }>();
 
 const instanceId = useId();
@@ -51,13 +56,44 @@ const editorLabelId = `note-editor-label-${instanceId}`;
 const pinCheckboxId = `note-pin-${instanceId}`;
 const linkInputId = `note-link-url-${instanceId}`;
 
-const isPinned = ref<boolean>(props.initialPinned);
-const validationError = ref<string>('');
-const showLinkBar = ref<boolean>(false);
-const linkUrlDraft = ref<string>('');
-const linkError = ref<string>('');
-const fallbackText = ref<string>('');
-const hasContent = ref<boolean>(false);
+function extractPlainTextFromDoc(doc: ProseMirrorDoc | null | undefined): string {
+    if (!doc || typeof doc !== 'object') {
+        return '';
+    }
+
+    const lines: string[] = [];
+    const walkBlock = (node: unknown): void => {
+        if (!node || typeof node !== 'object') {
+            return;
+        }
+        const candidate = node as { type?: string; text?: string; content?: unknown[] };
+        if (candidate.type === 'paragraph' || candidate.type === 'heading') {
+            const parts: string[] = [];
+            const collectText = (inner: unknown): void => {
+                if (!inner || typeof inner !== 'object') {
+                    return;
+                }
+                const c = inner as { type?: string; text?: string; content?: unknown[] };
+                if (c.type === 'text' && typeof c.text === 'string') {
+                    parts.push(c.text);
+                } else if (Array.isArray(c.content)) {
+                    c.content.forEach(collectText);
+                }
+            };
+            if (Array.isArray(candidate.content)) {
+                candidate.content.forEach(collectText);
+            }
+            lines.push(parts.join(''));
+            return;
+        }
+        if (Array.isArray(candidate.content)) {
+            candidate.content.forEach(walkBlock);
+        }
+    };
+
+    walkBlock(doc);
+    return lines.join('\n').trim();
+}
 
 function checkDocHasContent(doc: ProseMirrorDoc | null | undefined): boolean {
     if (!doc || typeof doc !== 'object') {
@@ -80,6 +116,19 @@ function checkDocHasContent(doc: ProseMirrorDoc | null | undefined): boolean {
 
     return walk(doc);
 }
+
+const initialDocContent: ProseMirrorDoc =
+    props.initialDocument && props.initialDocument.type === 'doc'
+        ? props.initialDocument
+        : { type: 'doc', content: [{ type: 'paragraph' }] };
+
+const isPinned = ref<boolean>(props.initialPinned);
+const validationError = ref<string>('');
+const showLinkBar = ref<boolean>(false);
+const linkUrlDraft = ref<string>('');
+const linkError = ref<string>('');
+const fallbackText = ref<string>(extractPlainTextFromDoc(props.initialDocument));
+const hasContent = ref<boolean>(checkDocHasContent(props.initialDocument));
 
 function buildFallbackDoc(rawText: string): ProseMirrorDoc {
     const lines = rawText.split(/\r?\n/);
@@ -112,10 +161,7 @@ function createSafeEditor(): ShallowRef<Editor | undefined> {
                     },
                 }),
             ],
-            content: {
-                type: 'doc',
-                content: [{ type: 'paragraph' }],
-            },
+            content: initialDocContent,
             editorProps: {
                 attributes: {
                     role: 'textbox',
@@ -126,8 +172,10 @@ function createSafeEditor(): ShallowRef<Editor | undefined> {
                 handleKeyDown: (_view, event) => {
                     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                         event.preventDefault();
-                        handleSubmit();
-                        return true;
+                        if (!props.hideFooter) {
+                            handleSubmit();
+                            return true;
+                        }
                     }
                     return false;
                 },
@@ -138,6 +186,7 @@ function createSafeEditor(): ShallowRef<Editor | undefined> {
                 if (hasContent.value) {
                     validationError.value = '';
                 }
+                emit('update:document', json);
             },
         });
     } catch {
@@ -163,6 +212,20 @@ watch(
     () => props.resetKey,
     () => {
         reset();
+    },
+);
+
+watch(
+    () => props.initialDocument,
+    (nextDoc) => {
+        const targetDoc: ProseMirrorDoc =
+            nextDoc && nextDoc.type === 'doc'
+                ? nextDoc
+                : { type: 'doc', content: [{ type: 'paragraph' }] };
+        fallbackText.value = extractPlainTextFromDoc(nextDoc);
+        hasContent.value = checkDocHasContent(nextDoc);
+        validationError.value = '';
+        editor?.value?.commands.setContent(targetDoc);
     },
 );
 
@@ -231,6 +294,7 @@ function handleFallbackInput(): void {
     if (hasContent.value) {
         validationError.value = '';
     }
+    emit('update:document', buildFallbackDoc(fallbackText.value));
 }
 
 function handleSubmit(): void {
@@ -266,6 +330,8 @@ function reset(): void {
 defineExpose({
     reset,
     editor,
+    getDocumentJson: currentDocumentJson,
+    isEmpty: () => !checkDocHasContent(currentDocumentJson()),
 });
 </script>
 
@@ -447,6 +513,7 @@ defineExpose({
 
         <!-- Footer Controls -->
         <div
+            v-if="!props.hideFooter"
             class="flex flex-wrap items-center justify-between gap-2 border-t border-default bg-surface px-3 py-2"
         >
             <label
