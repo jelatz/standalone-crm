@@ -790,3 +790,142 @@ it('gates related deals and deals_count by DealPolicy::viewAny for roles lacking
             ->where('contact.id', $contact->id)
             ->has('deals', 0));
 });
+
+it('prevents Contacts company_id filter oracle, sets has_masked_company, blocks unlinking inaccessible companies, and masks RelatedDealData IDs', function (): void {
+    $dept = Department::query()->create(['name' => 'Commercial', 'slug' => 't13-contact-hardening']);
+    $admin = createTask13User($dept, 'EMP-CH-ADM', 'admin.ch@acme.internal', RoleEnum::Admin);
+    $repA = createTask13User($dept, 'EMP-CH-A', 'rep.a.ch@acme.internal', RoleEnum::Sales);
+    $repB = createTask13User($dept, 'EMP-CH-B', 'rep.b.ch@acme.internal', RoleEnum::Sales);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
+
+    $companyA = Company::query()->create(['name' => 'Secret Co A', 'domain' => 'secreta.io', 'owner_id' => $repA->id]);
+    $companyB = Company::query()->create(['name' => 'Rep B Co', 'domain' => 'repb.io', 'owner_id' => $repB->id]);
+
+    $contactA = Contact::query()->create([
+        'company_id' => $companyA->id,
+        'owner_id' => $repA->id,
+        'first_name' => 'Masked',
+        'last_name' => 'Link',
+        'primary_email' => 'masked@secreta.io',
+    ]);
+    $unlinkedContact = Contact::query()->create([
+        'company_id' => null,
+        'owner_id' => $repA->id,
+        'first_name' => 'No',
+        'last_name' => 'Company',
+    ]);
+
+    // Hidden contact in Company A (owned by Rep A, NOT shared with Rep B)
+    $hiddenPrimaryContact = Contact::query()->create([
+        'company_id' => $companyA->id,
+        'owner_id' => $repA->id,
+        'first_name' => 'Hidden',
+        'last_name' => 'Primary',
+    ]);
+
+    // Deal under Company A with hiddenPrimaryContact, shared as Viewer ONLY with Rep B (so Rep B can view Deal A on Company/Contact detail, NOT Company A or hiddenPrimaryContact!)
+    $dealUnderCoA = Deal::query()->create([
+        'company_id' => $companyA->id,
+        'primary_contact_id' => $hiddenPrimaryContact->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $repA->id,
+        'title' => 'Co A Deal With Hidden Contact',
+        'stage_entered_at' => now(),
+    ]);
+    $dealUnderCoA->contacts()->attach($contactA->id, ['stakeholder_role' => DealStakeholderRoleEnum::Champion->value]);
+
+    // Grant Rep B Editor access on Contact A ONLY (NOT Company A, NOT hiddenPrimaryContact) and Viewer on dealUnderCoA
+    $grant = app(GrantEntityCollaboratorAction::class);
+    $grant->execute($contactA, $repB, CollaboratorAccessLevel::Editor, CollaboratorRoleLabel::SalesOverlay, $repA);
+    $grant->execute($dealUnderCoA, $repB, CollaboratorAccessLevel::Viewer, CollaboratorRoleLabel::Observer, $repA);
+
+    // 1. No company_id filter oracle on ContactsIndexPage: filtering by inaccessible Company A returns 0 contacts!
+    $this->actingAs($repB)->get("/app/crm/contacts?company_id={$companyA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/ContactsIndexPage')
+            ->has('contacts.data', 0));
+
+    // 2. ContactDetailPage sets has_masked_company = true for Rep B, false for Rep A, false when company_id is null
+    //    AND RelatedDealData masks company_id / primary_contact_id on dealUnderCoA for Rep B!
+    $this->actingAs($repB)->get("/app/crm/contacts/{$contactA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/ContactDetailPage')
+            ->where('contact.id', $contactA->id)
+            ->where('contact.company_id', null)
+            ->where('contact.has_masked_company', true)
+            ->has('deals', 1)
+            ->where('deals.0.id', $dealUnderCoA->id)
+            ->where('deals.0.company_id', null)
+            ->where('deals.0.primary_contact_id', null));
+
+    $this->actingAs($repA)->get("/app/crm/contacts/{$contactA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('contact.company_id', $companyA->id)
+            ->where('contact.has_masked_company', false)
+            ->where('deals.0.company_id', $companyA->id)
+            ->where('deals.0.primary_contact_id', $hiddenPrimaryContact->id));
+
+    $this->actingAs($repA)->get("/app/crm/contacts/{$unlinkedContact->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('contact.company_id', null)
+            ->where('contact.has_masked_company', false));
+
+    // 3. CompanyDetailPage masks RelatedDealData.primary_contact_id when primary contact is not visible to viewer!
+    $grant->execute($companyA, $repB, CollaboratorAccessLevel::Viewer, CollaboratorRoleLabel::Observer, $repA);
+    $this->actingAs($repB)->get("/app/crm/companies/{$companyA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/CompanyDetailPage')
+            ->has('deals', 1)
+            ->where('deals.0.id', $dealUnderCoA->id)
+            ->where('deals.0.company_id', $companyA->id)
+            ->where('deals.0.primary_contact_id', null));
+
+    // Revoke Company A access from Rep B for update protection assertions
+    $this->actingAs($repA)->deleteJson("/api/internal/crm/companies/{$companyA->id}/collaborators/{$repB->id}")->assertOk();
+
+    // 4. Rep B (Editor on Contact A, no Company A access) CANNOT unlink/replace masked company_id
+    $this->actingAs($repB)->patchJson("/api/internal/crm/contacts/{$contactA->id}", [
+        'company_id' => null,
+    ])->assertForbidden();
+    expect(Contact::query()->findOrFail($contactA->id)->company_id)->toBe($companyA->id);
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/contacts/{$contactA->id}", [
+        'company_id' => $companyB->id,
+    ])->assertForbidden();
+    expect(Contact::query()->findOrFail($contactA->id)->company_id)->toBe($companyA->id);
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/contacts/{$contactA->id}", [
+        'company_id' => $companyA->id,
+    ])->assertForbidden();
+
+    // Omitting company_id allows Editor Rep B to update Contact A while preserving DB company_id and returning has_masked_company = true
+    $this->actingAs($repB)->patchJson("/api/internal/crm/contacts/{$contactA->id}", [
+        'job_title' => 'Principal Architect',
+    ])->assertOk()
+        ->assertJsonPath('job_title', 'Principal Architect')
+        ->assertJsonPath('company_id', null)
+        ->assertJsonPath('has_masked_company', true);
+    expect(Contact::query()->findOrFail($contactA->id)->company_id)->toBe($companyA->id);
+
+    // Rep A (who CAN view Company A) CAN explicitly unlink company_id: null
+    $this->actingAs($repA)->patchJson("/api/internal/crm/contacts/{$contactA->id}", [
+        'company_id' => null,
+    ])->assertOk()
+        ->assertJsonPath('company_id', null)
+        ->assertJsonPath('has_masked_company', false);
+    expect(Contact::query()->findOrFail($contactA->id)->company_id)->toBeNull();
+
+    // Admin sanity check: Contact without company has has_masked_company = false
+    $this->actingAs($admin)->get("/app/crm/contacts/{$contactA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('contact.has_masked_company', false));
+});

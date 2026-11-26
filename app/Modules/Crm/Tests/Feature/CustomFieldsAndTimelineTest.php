@@ -10,15 +10,20 @@ use App\Modules\Core\Users\Models\Department;
 use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Companies\Models\Company;
 use App\Modules\Crm\Contacts\Models\Contact;
+use App\Modules\Crm\CustomFields\Actions\UpsertCustomFieldDefinitionAction;
 use App\Modules\Crm\CustomFields\Actions\ValidateEntityCustomFieldsAction;
+use App\Modules\Crm\CustomFields\Data\UpsertCustomFieldDefinitionData;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldEntityTypeEnum;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldTypeEnum;
 use App\Modules\Crm\CustomFields\Models\CustomFieldDefinition;
 use App\Modules\Crm\Deals\Models\Deal;
 use App\Modules\Crm\Notes\Actions\CreateNoteAction;
 use App\Modules\Crm\Notes\Actions\SanitizeTipTapAstAction;
+use App\Modules\Crm\Notes\Actions\TogglePinNoteAction;
+use App\Modules\Crm\Notes\Actions\UpdateNoteAction;
 use App\Modules\Crm\Notes\Data\CreateNoteData;
 use App\Modules\Crm\Notes\Data\NoteTargetData;
+use App\Modules\Crm\Notes\Data\UpdateNoteData;
 use App\Modules\Crm\Notes\Models\Note;
 use App\Modules\Crm\Pipelines\Enums\PipelineStageTypeEnum;
 use App\Modules\Crm\Pipelines\Models\Pipeline;
@@ -30,8 +35,11 @@ use App\Modules\Crm\Timeline\Models\Activity;
 use App\Modules\Crm\Timeline\Models\ActivityLink;
 use Database\Seeders\CrmDefaultsSeeder;
 use Database\Seeders\RolesPermissionsSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\PermissionRegistrar;
@@ -650,8 +658,17 @@ it('fans out note activity_links, enforces cross-silo NoteController/NotePolicy 
     ])->assertOk()
         ->assertJsonPath('body_text', 'Updated procurement note.');
 
-    // Rep B cannot update or delete Rep A's note linked to dealA/company/contact? Wait: Rep B is Editor on $company!
-    // Let's create a Deal-A-only note by Rep A and verify reassignment strips Rep A's access!
+    // Rep B is Editor on $company ONLY (NOT $dealA) -> CANNOT update, pin, or delete $note co-linked to $dealA!
+    $this->actingAs($repB)->patchJson("/api/internal/crm/notes/{$noteId}", [
+        'body_json' => [
+            'type' => 'doc',
+            'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Unauthorized edit']]]],
+        ],
+    ])->assertForbidden();
+    $this->actingAs($repB)->patchJson("/api/internal/crm/notes/{$noteId}/pin", ['is_pinned' => true])->assertForbidden();
+    $this->actingAs($repB)->deleteJson("/api/internal/crm/notes/{$noteId}")->assertForbidden();
+
+    // Create a Deal-A-only note by Rep A and verify reassignment strips Rep A's access!
     $dealOnlyNote = app(CreateNoteAction::class)->execute(
         actor: $repA,
         data: new CreateNoteData(
@@ -743,4 +760,314 @@ it('fans out note activity_links, enforces cross-silo NoteController/NotePolicy 
     $this->actingAs($repB)
         ->getJson('/api/internal/crm/timeline?linkable_type=deal&linkable_id='.$dealA->id)
         ->assertForbidden();
+});
+
+it('gates timeline sources by module viewAny permission, enforces strict ISO-8601 cursor parsing, caps scan batches, and records microsecond UTC activity_links', function (): void {
+    $dept = Department::query()->create(['name' => 'Security Ops', 'slug' => 't12-tl-hardening']);
+    $repA = createTask12User($dept, 'EMP-TH-A', 'rep.a.th@acme.internal', RoleEnum::Sales);
+    $repB = createTask12User($dept, 'EMP-TH-B', 'rep.b.th@acme.internal', RoleEnum::Sales);
+    $itUser = createTask12User($dept, 'EMP-TH-IT', 'it.th@acme.internal', RoleEnum::It);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
+
+    $company = Company::query()->create(['name' => 'Gated Timeline Co', 'owner_id' => $repA->id]);
+    $contact = Contact::query()->create([
+        'company_id' => $company->id,
+        'owner_id' => $repA->id,
+        'first_name' => 'Alan',
+        'last_name' => 'Turing',
+    ]);
+    $dealA = Deal::query()->create([
+        'company_id' => $company->id,
+        'primary_contact_id' => $contact->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $repA->id,
+        'title' => 'Hidden Deal From IT',
+        'stage_entered_at' => now(),
+    ]);
+    $dealB = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $repB->id,
+        'title' => 'Silo B Flood Deal',
+        'stage_entered_at' => now(),
+    ]);
+
+    // Grant IT collaborator access on Company, Contact, AND Deal A (IT still lacks deals.view!)
+    $grant = app(GrantEntityCollaboratorAction::class);
+    foreach ([$company, $contact, $dealA] as $target) {
+        $grant->execute(
+            collaboratable: $target,
+            user: $itUser,
+            accessLevel: CollaboratorAccessLevel::Manager,
+            roleLabel: CollaboratorRoleLabel::ItLead,
+            grantedBy: $repA,
+        );
+    }
+
+    $recordActivity = app(RecordActivityAction::class);
+    $baseTime = now()->toImmutable()->subMinutes(10)->startOfSecond();
+
+    // Verify RecordActivityAction formats activity_links.occurred_at in UTC with microsecond +00 format
+    /** @var list<array<int|string, mixed>> $activityLinkInsertBindings */
+    $activityLinkInsertBindings = [];
+    DB::listen(static function (QueryExecuted $query) use (&$activityLinkInsertBindings): void {
+        if (str_contains($query->sql, 'insert into "activity_links"')) {
+            $activityLinkInsertBindings[] = $query->bindings;
+        }
+    });
+
+    $recordActivity->execute(
+        actor: $repA,
+        activityType: ActivityTypeEnum::FieldUpdated,
+        sourceType: 'company',
+        sourceId: $company->id,
+        targets: ['company' => $company->id],
+        summary: 'Company first',
+        occurredAt: $baseTime->setTimezone('America/New_York')->addMicroseconds(123456),
+    );
+    $recordActivity->execute(
+        actor: $repA,
+        activityType: ActivityTypeEnum::FieldUpdated,
+        sourceType: 'contact',
+        sourceId: $contact->id,
+        targets: ['company' => $company->id, 'contact' => $contact->id],
+        summary: 'Contact second',
+        occurredAt: $baseTime->addSeconds(1),
+    );
+    $recordActivity->execute(
+        actor: $repA,
+        activityType: ActivityTypeEnum::DealCreated,
+        sourceType: 'deal',
+        sourceId: $dealA->id,
+        targets: ['company' => $company->id, 'deal' => $dealA->id],
+        summary: 'Deal A created secret from IT',
+        occurredAt: $baseTime->addSeconds(2),
+    );
+
+    expect($activityLinkInsertBindings)->not->toBeEmpty()
+        ->and(collect($activityLinkInsertBindings[0])->contains(
+            static fn (mixed $value): bool => is_string($value)
+                && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.123456\+00$/', $value) === 1,
+        ))->toBeTrue();
+
+    // IT sees company + contact activities in descending order, NEVER deal activity
+    $itPage1 = $this->actingAs($itUser)
+        ->getJson('/api/internal/crm/timeline?linkable_type=company&linkable_id='.$company->id.'&limit=1')
+        ->assertOk()
+        ->assertJsonPath('has_more', true)
+        ->assertJsonCount(1, 'items')
+        ->assertJsonPath('items.0.summary', 'Contact second');
+
+    $this->actingAs($itUser)
+        ->getJson('/api/internal/crm/timeline?linkable_type=company&linkable_id='.$company->id.'&limit=1&cursor='.urlencode((string) $itPage1->json('next_cursor')))
+        ->assertOk()
+        ->assertJsonPath('has_more', false)
+        ->assertJsonCount(1, 'items')
+        ->assertJsonPath('items.0.summary', 'Company first');
+
+    // Malformed / fuzzy cursor timestamps rejected cleanly with 422 ValidationException
+    $badPayloads = [
+        base64_encode(json_encode(['occurred_at' => 'next tuesday', 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+        base64_encode(json_encode(['occurred_at' => '2026-11-26 01:35:28.123456+00', 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+        base64_encode(json_encode(['occurred_at' => '2026-02-30T01:35:28.123456+00:00', 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+        base64_encode(json_encode(['occurred_at' => '2026-11-26T01:35:28', 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+        'not-valid-base64!!!',
+    ];
+    foreach ($badPayloads as $badCursor) {
+        $this->actingAs($repA)
+            ->getJson('/api/internal/crm/timeline?linkable_type=company&linkable_id='.$company->id.'&cursor='.urlencode($badCursor))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['cursor']);
+    }
+
+    // Valid ISO-8601 variants (microsecond +00 and ATOM fallback) succeed
+    $validCursors = [
+        base64_encode(json_encode(['occurred_at' => $baseTime->addSeconds(10)->utc()->format('Y-m-d\TH:i:s.u+00'), 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+        base64_encode(json_encode(['occurred_at' => $baseTime->addSeconds(10)->utc()->format(DateTimeInterface::ATOM), 'activity_id' => (string) Str::uuid7()], JSON_THROW_ON_ERROR)),
+    ];
+    foreach ($validCursors as $validCursor) {
+        $this->actingAs($repA)
+            ->getJson('/api/internal/crm/timeline?linkable_type=company&linkable_id='.$company->id.'&cursor='.urlencode($validCursor))
+            ->assertOk();
+    }
+
+    // MAX_SCAN_BATCHES (20) caps scan loop when 1050 inaccessible Deal B activities precede visible items
+    $floodActivities = [];
+    $floodLinks = [];
+    $floodStart = $baseTime->addMinutes(1);
+    for ($i = 0; $i < 1050; $i++) {
+        $actId = (string) Str::uuid7();
+        $ts = $floodStart->addMicroseconds($i * 10)->utc()->format('Y-m-d H:i:s.u+00');
+        $floodActivities[] = [
+            'id' => $actId,
+            'actor_id' => $repB->id,
+            'activity_type' => ActivityTypeEnum::StageChanged->value,
+            'source_type' => 'deal',
+            'source_id' => $dealB->id,
+            'visibility_mode' => 'source_policy',
+            'summary' => "Hidden flood {$i}",
+            'metadata' => '{}',
+            'occurred_at' => $ts,
+            'created_at' => $ts,
+        ];
+        $floodLinks[] = [
+            'linkable_type' => 'company',
+            'linkable_id' => $company->id,
+            'occurred_at' => $ts,
+            'activity_id' => $actId,
+        ];
+    }
+    foreach (array_chunk($floodActivities, 500) as $chunk) {
+        DB::table('activities')->insert($chunk);
+    }
+    foreach (array_chunk($floodLinks, 500) as $chunk) {
+        DB::table('activity_links')->insert($chunk);
+    }
+
+    $batchQueries = 0;
+    DB::listen(static function (QueryExecuted $query) use (&$batchQueries): void {
+        if (str_contains($query->sql, 'from "activity_links"') && str_contains($query->sql, 'limit 50')) {
+            $batchQueries++;
+        }
+    });
+
+    $boundedResult = app(QueryEntityTimelineAction::class)->execute($repA, 'company', $company->id, null, 25);
+    expect($batchQueries)->toBe(QueryEntityTimelineAction::MAX_SCAN_BATCHES)
+        ->and($boundedResult->items)->toBeEmpty()
+        ->and($boundedResult->has_more)->toBeFalse();
+});
+
+it('enforces custom field immutability, stage_required_fields protection, pipeline route scopeBindings, and Note FOR UPDATE locking', function (): void {
+    $dept = Department::query()->create(['name' => 'Ops', 'slug' => 't12-cf-note-lock']);
+    $admin = createTask12User($dept, 'EMP-CFN-ADM', 'admin.cfn@acme.internal', RoleEnum::Admin);
+    $repA = createTask12User($dept, 'EMP-CFN-REPA', 'rep.a.cfn@acme.internal', RoleEnum::Sales);
+    $demotedAuthor = createTask12User($dept, 'EMP-CFN-DEM', 'demoted.cfn@acme.internal', RoleEnum::Sales);
+
+    $pipelineA = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $pipelineB = Pipeline::query()->where('slug', 'renewal-upsell')->firstOrFail();
+    $stageA = $pipelineA->stages()->orderBy('sort_order')->firstOrFail();
+    $stageB = $pipelineB->stages()->orderBy('sort_order')->firstOrFail();
+
+    // 1. Cross-pipeline stage route binding returns 404 via scopeBindings()
+    $this->actingAs($admin)
+        ->patchJson("/api/internal/crm/pipelines/{$pipelineA->id}/stages/{$stageB->id}", ['win_probability' => 45])
+        ->assertNotFound();
+    $this->actingAs($admin)
+        ->deleteJson("/api/internal/crm/pipelines/{$pipelineA->id}/stages/{$stageB->id}")
+        ->assertNotFound();
+
+    // 2. Custom field immutability (entity_type, key) and stage_required_fields protection
+    $field = app(UpsertCustomFieldDefinitionAction::class)->execute(new UpsertCustomFieldDefinitionData(
+        entity_type: CustomFieldEntityTypeEnum::Deal,
+        pipeline_id: null,
+        key: 'security_clearance',
+        label: 'Security Clearance',
+        field_type: CustomFieldTypeEnum::Text,
+    ));
+
+    // Reject entity_type or key mutation
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'entity_type' => CustomFieldEntityTypeEnum::Company->value,
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['entity_type']);
+
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'key' => 'renamed_key',
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['key']);
+
+    // Idempotent resend of unchanged entity_type and key succeeds
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'entity_type' => CustomFieldEntityTypeEnum::Deal->value,
+        'key' => 'security_clearance',
+        'label' => 'Security Clearance Level',
+    ])->assertOk()
+        ->assertJsonPath('label', 'Security Clearance Level');
+
+    // Attach field as required on stageA (Pipeline A)
+    $stageA->requiredCustomFields()->sync([$field->id]);
+
+    // Cannot deactivate while required by stageA
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'is_active' => false,
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['is_active']);
+
+    // Cannot scope to incompatible Pipeline B while required by stageA in Pipeline A
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'pipeline_id' => $pipelineB->id,
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['pipeline_id']);
+
+    // Scoping to compatible Pipeline A (sole referencing pipeline) succeeds
+    $this->actingAs($admin)->patchJson("/api/internal/crm/custom-fields/{$field->id}", [
+        'pipeline_id' => $pipelineA->id,
+    ])->assertOk()
+        ->assertJsonPath('pipeline_id', $pipelineA->id);
+
+    // 3. TogglePinNoteAction & UpdateNoteAction lock FOR UPDATE & compute nextPinned from fresh locked row
+    $company = Company::query()->create(['name' => 'Pin Lock Co', 'owner_id' => $repA->id]);
+    $deal = Deal::query()->create([
+        'company_id' => $company->id,
+        'pipeline_id' => $pipelineA->id,
+        'stage_id' => $stageA->id,
+        'owner_id' => $repA->id,
+        'title' => 'Pin Lock Deal',
+        'stage_entered_at' => now(),
+    ]);
+
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $deal,
+        user: $demotedAuthor,
+        accessLevel: CollaboratorAccessLevel::Editor,
+        roleLabel: CollaboratorRoleLabel::SalesOverlay,
+        grantedBy: $repA,
+    );
+
+    $note = app(CreateNoteAction::class)->execute($demotedAuthor, new CreateNoteData(
+        body_json: ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Initial note']]]]],
+        targets: [new NoteTargetData('deal', $deal->id)],
+        is_pinned: false,
+    ));
+
+    // Demote author to Viewer -> HTTP update/pin/delete all 403
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $deal,
+        user: $demotedAuthor,
+        accessLevel: CollaboratorAccessLevel::Viewer,
+        roleLabel: CollaboratorRoleLabel::Observer,
+        grantedBy: $repA,
+    );
+
+    $this->actingAs($demotedAuthor)->patchJson("/api/internal/crm/notes/{$note->id}", [
+        'body_json' => ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Demoted edit']]]]],
+    ])->assertForbidden();
+    $this->actingAs($demotedAuthor)->patchJson("/api/internal/crm/notes/{$note->id}/pin", ['is_pinned' => true])->assertForbidden();
+    $this->actingAs($demotedAuthor)->deleteJson("/api/internal/crm/notes/{$note->id}")->assertForbidden();
+
+    // Simulate stale model passed to TogglePinNoteAction after concurrent toggle -> FOR UPDATE reads fresh DB state
+    $staleNote = Note::query()->findOrFail($note->id);
+    Note::query()->whereKey($note->id)->update(['is_pinned' => true]);
+
+    $noteLocks = 0;
+    DB::listen(static function (QueryExecuted $query) use (&$noteLocks): void {
+        if (str_contains(strtolower($query->sql), 'from "notes"') && str_contains(strtolower($query->sql), 'for update')) {
+            $noteLocks++;
+        }
+    });
+
+    // Stale instance thought is_pinned=false, DB actually had is_pinned=true -> toggle must flip to false!
+    $toggled = app(TogglePinNoteAction::class)->execute($repA, $staleNote, null);
+    expect($toggled->is_pinned)->toBeFalse()
+        ->and($noteLocks)->toBeGreaterThanOrEqual(1);
+
+    $beforeUpdateLocks = $noteLocks;
+    app(UpdateNoteAction::class)->execute($repA, $staleNote, new UpdateNoteData(
+        body_json: ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Locked update']]]]],
+    ));
+    expect($noteLocks)->toBeGreaterThan($beforeUpdateLocks);
 });

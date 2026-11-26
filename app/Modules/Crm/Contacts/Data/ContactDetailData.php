@@ -33,11 +33,13 @@ class ContactDetailData extends Data
         public array $custom_fields,
         public string $created_at,
         public string $updated_at,
+        public bool $has_masked_company = false,
     ) {}
 
     public static function fromModel(Contact $contact, bool $canViewCompany = true): self
     {
         $owner = $contact->relationLoaded('owner') ? $contact->owner : null;
+        $hasMaskedCompany = $contact->company_id !== null && ! $canViewCompany;
         $company = $canViewCompany && $contact->relationLoaded('company') ? $contact->company : null;
 
         /** @var list<string> $secondaryEmails */
@@ -67,6 +69,7 @@ class ContactDetailData extends Data
             custom_fields: $contact->custom_fields ?? [],
             created_at: $contact->created_at?->toIso8601String() ?? now()->toIso8601String(),
             updated_at: $contact->updated_at?->toIso8601String() ?? now()->toIso8601String(),
+            has_masked_company: $hasMaskedCompany,
         );
     }
 }

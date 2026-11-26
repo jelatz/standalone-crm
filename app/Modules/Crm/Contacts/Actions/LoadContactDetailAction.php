@@ -6,11 +6,11 @@ use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Contacts\Data\ContactDetailData;
 use App\Modules\Crm\Contacts\Models\Contact;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldEntityTypeEnum;
-use App\Modules\Crm\Deals\Data\RelatedDealData;
 use App\Modules\Crm\Deals\Models\Deal;
 use App\Modules\Crm\Shared\Actions\LoadEntityContextAction;
 use App\Modules\Crm\Timeline\Actions\QueryEntityTimelineAction;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\Gate;
 
@@ -44,7 +44,7 @@ class LoadContactDetailAction
             ]
             : null;
 
-        $deals = Gate::forUser($viewer)->allows('viewAny', Deal::class)
+        $dealModels = Gate::forUser($viewer)->allows('viewAny', Deal::class)
             ? Deal::query()
                 ->visibleTo($viewer)
                 ->where(function (Builder $sub) use ($contact): void {
@@ -59,10 +59,9 @@ class LoadContactDetailAction
                 ->with(['pipeline:id,name', 'stage:id,name,stage_type', 'owner:id,name', 'accountManager:id,name'])
                 ->orderByDesc('updated_at')
                 ->get()
-                ->map(static fn (Deal $deal): RelatedDealData => RelatedDealData::fromModel($deal))
-                ->values()
-                ->all()
-            : [];
+            : new EloquentCollection;
+
+        $deals = $this->context->relatedDeals($viewer, $dealModels);
 
         $canUpdate = Gate::forUser($viewer)->allows('update', $contact);
         $canManageCollaborators = Gate::forUser($viewer)->allows('manageCollaborators', $contact);

@@ -66,11 +66,11 @@ class NotePolicy
             ->groupBy('linkable_type');
 
         if ($linksByType->isEmpty()) {
-            return (string) $note->author_id === (string) $user->id;
+            return $targetAbility === 'view'
+                && (string) $note->author_id === (string) $user->id;
         }
 
-        $hasViewAccess = false;
-        $hasTargetAbility = false;
+        $existingTargetCount = 0;
 
         foreach ($linksByType as $linkableType => $links) {
             $modelClass = Relation::getMorphedModel((string) $linkableType);
@@ -90,28 +90,26 @@ class NotePolicy
             $targets = $modelClass::query()->whereKey($ids)->get();
 
             foreach ($targets as $target) {
-                if (Gate::forUser($user)->allows('view', $target)) {
-                    $hasViewAccess = true;
+                $existingTargetCount++;
 
-                    if ($targetAbility === 'view') {
+                if ($targetAbility === 'view') {
+                    if (Gate::forUser($user)->allows('view', $target)) {
                         return true;
                     }
+
+                    continue;
                 }
 
-                if ($targetAbility !== 'view' && Gate::forUser($user)->allows($targetAbility, $target)) {
-                    $hasTargetAbility = true;
-
-                    if ($hasViewAccess) {
-                        return true;
-                    }
+                if (! Gate::forUser($user)->allows($targetAbility, $target)) {
+                    return false;
                 }
             }
         }
 
-        if (! $hasViewAccess) {
+        if ($targetAbility === 'view') {
             return false;
         }
 
-        return $hasTargetAbility || (string) $note->author_id === (string) $user->id;
+        return $existingTargetCount > 0;
     }
 }

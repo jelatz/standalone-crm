@@ -154,7 +154,11 @@ class MoveDealStageAction
                     ? trim((string) $rawContactId)
                     : null;
 
-                if ($candidateContactId !== null && $candidateContactId !== $nextPrimaryContactId) {
+                if ($candidateContactId !== $nextPrimaryContactId) {
+                    $this->assertAssociations->assertCanModifyExistingContact($actor, $nextPrimaryContactId);
+                }
+
+                if ($candidateContactId !== null) {
                     $this->assertAssociations->assertContactVisible($actor, $candidateContactId);
                 }
 

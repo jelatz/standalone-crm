@@ -13,10 +13,14 @@ use App\Modules\Core\Users\Data\UserSummaryData;
 use App\Modules\Core\Users\Enums\UserStatusEnum;
 use App\Modules\Core\Users\Models\User;
 use App\Modules\Crm\Companies\Models\Company;
+use App\Modules\Crm\Contacts\Models\Contact;
 use App\Modules\Crm\CustomFields\Data\CustomFieldDefinitionData;
 use App\Modules\Crm\CustomFields\Enums\CustomFieldEntityTypeEnum;
 use App\Modules\Crm\CustomFields\Models\CustomFieldDefinition;
+use App\Modules\Crm\Deals\Data\RelatedDealData;
+use App\Modules\Crm\Deals\Models\Deal;
 use App\Support\Silo\VisibleScopeResolver;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 
@@ -150,6 +154,65 @@ class LoadEntityContextAction
                 'name' => $company->name,
                 'domain' => $company->domain,
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Map visible Deal models to RelatedDealData while masking inaccessible company/primary contact IDs.
+     *
+     * @param  EloquentCollection<int, Deal>  $deals
+     * @return list<RelatedDealData>
+     */
+    public function relatedDeals(User $viewer, EloquentCollection $deals): array
+    {
+        if ($deals->isEmpty()) {
+            return [];
+        }
+
+        $companyIds = $deals->pluck('company_id')
+            ->filter()
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $contactIds = $deals->pluck('primary_contact_id')
+            ->filter()
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        /** @var array<string, int|string> $visibleCompanyIds */
+        $visibleCompanyIds = ($companyIds !== [] && Gate::forUser($viewer)->allows('viewAny', Company::class))
+            ? Company::query()
+                ->visibleTo($viewer)
+                ->whereIn('id', $companyIds)
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->flip()
+                ->all()
+            : [];
+
+        /** @var array<string, int|string> $visibleContactIds */
+        $visibleContactIds = ($contactIds !== [] && Gate::forUser($viewer)->allows('viewAny', Contact::class))
+            ? Contact::query()
+                ->visibleTo($viewer)
+                ->whereIn('id', $contactIds)
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->flip()
+                ->all()
+            : [];
+
+        return $deals
+            ->map(static fn (Deal $deal): RelatedDealData => RelatedDealData::fromModel(
+                deal: $deal,
+                canViewCompany: isset($visibleCompanyIds[(string) $deal->company_id]),
+                canViewPrimaryContact: $deal->primary_contact_id !== null
+                    && isset($visibleContactIds[(string) $deal->primary_contact_id]),
+            ))
             ->values()
             ->all();
     }

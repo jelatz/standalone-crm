@@ -655,4 +655,162 @@ it('enforces PipelinePolicy, CustomFieldDefinitionPolicy, and NotePolicy', funct
     $deal->delete();
     expect(Gate::forUser($admin)->allows('update', $deal))->toBeFalse()
         ->and(Gate::forUser($admin)->allows('moveStage', $deal))->toBeFalse();
+
+    // When zero existing targets remain (linked deal soft-deleted), non-admin cannot view/update/delete note, while Admin still can
+    expect(Gate::forUser($repA)->allows('view', $note->fresh()))->toBeFalse()
+        ->and(Gate::forUser($repA)->allows('update', $note->fresh()))->toBeFalse()
+        ->and(Gate::forUser($repA)->allows('delete', $note->fresh()))->toBeFalse()
+        ->and(Gate::forUser($directorA)->allows('update', $note->fresh()))->toBeFalse();
+
+    // Restore note (was deleted above) and verify Admin can view/update/delete even when zero existing targets remain
+    $note->restore();
+    expect(Gate::forUser($repA)->allows('view', $note))->toBeFalse()
+        ->and(Gate::forUser($repA)->allows('update', $note))->toBeFalse()
+        ->and(Gate::forUser($repA)->allows('delete', $note))->toBeFalse()
+        ->and(Gate::forUser($admin)->allows('view', $note))->toBeTrue()
+        ->and(Gate::forUser($admin)->allows('update', $note))->toBeTrue()
+        ->and(Gate::forUser($admin)->allows('delete', $note))->toBeTrue();
+});
+
+it('denies NotePolicy update and delete for demoted Viewer authors, Support authors, and partial-target Editors', function (): void {
+    $this->seed(CrmDefaultsSeeder::class);
+    $dept = Department::query()->create(['name' => 'Revenue', 'slug' => 'crm-note-hardening']);
+
+    $repA = createCrmTestUser($dept, 'EMP-NH-A', 'rep.a.nh@acme.internal', RoleEnum::Sales);
+    $repB = createCrmTestUser($dept, 'EMP-NH-B', 'rep.b.nh@acme.internal', RoleEnum::Sales);
+    $supportUser = createCrmTestUser($dept, 'EMP-NH-SUP', 'support.nh@acme.internal', RoleEnum::Support);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stage = $pipeline->stages()->orderBy('sort_order')->firstOrFail();
+
+    $companyA = Company::query()->create(['name' => 'Alpha Silo', 'owner_id' => $repA->id]);
+    $companyC = Company::query()->create(['name' => 'Shared Co C', 'owner_id' => $repA->id]);
+    $dealA = Deal::query()->create([
+        'company_id' => $companyA->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $stage->id,
+        'owner_id' => $repA->id,
+        'title' => 'Deal A Inaccessible',
+        'stage_entered_at' => now(),
+    ]);
+
+    // Rep B is Editor on Company C ONLY (no access to Deal A), while Rep B was Editor on Deal A when authoring $demotedAuthorNote
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $companyC,
+        user: $repB,
+        accessLevel: CollaboratorAccessLevel::Editor,
+        roleLabel: CollaboratorRoleLabel::SalesOverlay,
+        grantedBy: $repA,
+    );
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $dealA,
+        user: $repB,
+        accessLevel: CollaboratorAccessLevel::Editor,
+        roleLabel: CollaboratorRoleLabel::SalesOverlay,
+        grantedBy: $repA,
+    );
+
+    $demotedAuthorNote = Note::query()->create([
+        'author_id' => $repB->id,
+        'body_json' => ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Authored while editor']]]]],
+        'body_text' => 'Authored while editor',
+    ]);
+    $demotedActivity = Activity::query()->create([
+        'actor_id' => $repB->id,
+        'activity_type' => ActivityTypeEnum::NoteCreated,
+        'source_type' => 'note',
+        'source_id' => $demotedAuthorNote->id,
+        'summary' => 'Authored while editor',
+        'occurred_at' => now(),
+        'created_at' => now(),
+    ]);
+    ActivityLink::query()->create([
+        'linkable_type' => 'deal',
+        'linkable_id' => $dealA->id,
+        'occurred_at' => $demotedActivity->occurred_at,
+        'activity_id' => $demotedActivity->id,
+    ]);
+
+    // While Editor, Rep B can update/delete
+    expect(Gate::forUser($repB)->allows('update', $demotedAuthorNote))->toBeTrue();
+
+    // Demote Rep B to Viewer on Deal A -> Rep B retains view, loses update & delete despite being author
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $dealA,
+        user: $repB,
+        accessLevel: CollaboratorAccessLevel::Viewer,
+        roleLabel: CollaboratorRoleLabel::Observer,
+        grantedBy: $repA,
+    );
+
+    expect(Gate::forUser($repB)->allows('view', $demotedAuthorNote))->toBeTrue()
+        ->and(Gate::forUser($repB)->allows('update', $demotedAuthorNote))->toBeFalse()
+        ->and(Gate::forUser($repB)->allows('delete', $demotedAuthorNote))->toBeFalse();
+
+    // Support user granted Manager on Deal A (lacks deals.update permission) cannot update/delete even if set as author
+    app(GrantEntityCollaboratorAction::class)->execute(
+        collaboratable: $dealA,
+        user: $supportUser,
+        accessLevel: CollaboratorAccessLevel::Manager,
+        roleLabel: CollaboratorRoleLabel::SupportLead,
+        grantedBy: $repA,
+    );
+    $supportNote = Note::query()->create([
+        'author_id' => $supportUser->id,
+        'body_json' => ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Support note']]]]],
+        'body_text' => 'Support note',
+    ]);
+    $supportActivity = Activity::query()->create([
+        'actor_id' => $supportUser->id,
+        'activity_type' => ActivityTypeEnum::NoteCreated,
+        'source_type' => 'note',
+        'source_id' => $supportNote->id,
+        'summary' => 'Support note',
+        'occurred_at' => now(),
+        'created_at' => now(),
+    ]);
+    ActivityLink::query()->create([
+        'linkable_type' => 'deal',
+        'linkable_id' => $dealA->id,
+        'occurred_at' => $supportActivity->occurred_at,
+        'activity_id' => $supportActivity->id,
+    ]);
+
+    expect(Gate::forUser($supportUser)->allows('view', $supportNote))->toBeTrue()
+        ->and(Gate::forUser($supportUser)->allows('update', $supportNote))->toBeFalse()
+        ->and(Gate::forUser($supportUser)->allows('delete', $supportNote))->toBeFalse();
+
+    // Note co-linked to Company C (where Rep B is Editor) and Deal A (where Rep B is Viewer only): Rep B CANNOT update/delete
+    $coLinkedNote = Note::query()->create([
+        'author_id' => $repA->id,
+        'body_json' => ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Cross-target note']]]]],
+        'body_text' => 'Cross-target note',
+    ]);
+    $coLinkedActivity = Activity::query()->create([
+        'actor_id' => $repA->id,
+        'activity_type' => ActivityTypeEnum::NoteCreated,
+        'source_type' => 'note',
+        'source_id' => $coLinkedNote->id,
+        'summary' => 'Cross-target note',
+        'occurred_at' => now(),
+        'created_at' => now(),
+    ]);
+    ActivityLink::query()->insert([
+        [
+            'linkable_type' => 'company',
+            'linkable_id' => $companyC->id,
+            'occurred_at' => $coLinkedActivity->occurred_at->utc()->format('Y-m-d H:i:s.u+00'),
+            'activity_id' => $coLinkedActivity->id,
+        ],
+        [
+            'linkable_type' => 'deal',
+            'linkable_id' => $dealA->id,
+            'occurred_at' => $coLinkedActivity->occurred_at->utc()->format('Y-m-d H:i:s.u+00'),
+            'activity_id' => $coLinkedActivity->id,
+        ],
+    ]);
+
+    expect(Gate::forUser($repB)->allows('view', $coLinkedNote))->toBeTrue()
+        ->and(Gate::forUser($repB)->allows('update', $coLinkedNote))->toBeFalse()
+        ->and(Gate::forUser($repB)->allows('delete', $coLinkedNote))->toBeFalse();
 });

@@ -78,12 +78,32 @@ class UpdateDealAction
 
             $nextCompanyId = (string) $lockedDeal->company_id;
             if (! $data->company_id instanceof Optional) {
-                $candidateCompanyId = trim($data->company_id);
+                $candidateCompanyId = $data->company_id !== null && trim($data->company_id) !== ''
+                    ? trim($data->company_id)
+                    : null;
+
+                if ($candidateCompanyId === null) {
+                    $this->assertAssociations->assertCanModifyExistingCompany(
+                        $actor,
+                        $lockedDeal->company_id !== null ? (string) $lockedDeal->company_id : null,
+                    );
+
+                    throw ValidationException::withMessages([
+                        'company_id' => ['A deal must belong to a company.'],
+                    ]);
+                }
+
                 if ($candidateCompanyId !== (string) $lockedDeal->company_id) {
+                    $this->assertAssociations->assertCanModifyExistingCompany(
+                        $actor,
+                        $lockedDeal->company_id !== null ? (string) $lockedDeal->company_id : null,
+                    );
                     $this->assertAssociations->assertCompanyVisible($actor, $candidateCompanyId);
                     $attributes['company_id'] = $candidateCompanyId;
                     $changedFields[] = 'company_id';
                     $nextCompanyId = $candidateCompanyId;
+                } else {
+                    $this->assertAssociations->assertCompanyVisible($actor, $candidateCompanyId);
                 }
             }
 
@@ -93,7 +113,11 @@ class UpdateDealAction
                     ? trim($data->primary_contact_id)
                     : null;
 
-                if ($candidateContactId !== null && $candidateContactId !== $nextPrimaryContactId) {
+                if ($candidateContactId !== $nextPrimaryContactId) {
+                    $this->assertAssociations->assertCanModifyExistingContact($actor, $nextPrimaryContactId);
+                }
+
+                if ($candidateContactId !== null) {
                     $this->assertAssociations->assertContactVisible($actor, $candidateContactId);
                 }
 

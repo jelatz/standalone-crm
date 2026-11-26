@@ -12,7 +12,7 @@ class RelatedDealData extends Data
 {
     public function __construct(
         public string $id,
-        public string $company_id,
+        public ?string $company_id,
         public ?string $primary_contact_id,
         public string $pipeline_id,
         public ?string $pipeline_name,
@@ -32,8 +32,11 @@ class RelatedDealData extends Data
         public string $updated_at,
     ) {}
 
-    public static function fromModel(Deal $deal): self
-    {
+    public static function fromModel(
+        Deal $deal,
+        bool $canViewCompany = true,
+        bool $canViewPrimaryContact = true,
+    ): self {
         $pipeline = $deal->relationLoaded('pipeline') ? $deal->pipeline : null;
         $stage = $deal->relationLoaded('stage') ? $deal->stage : null;
         $owner = $deal->relationLoaded('owner') ? $deal->owner : null;
@@ -41,8 +44,10 @@ class RelatedDealData extends Data
 
         return new self(
             id: (string) $deal->id,
-            company_id: (string) $deal->company_id,
-            primary_contact_id: $deal->primary_contact_id !== null ? (string) $deal->primary_contact_id : null,
+            company_id: $canViewCompany ? (string) $deal->company_id : null,
+            primary_contact_id: $canViewPrimaryContact && $deal->primary_contact_id !== null
+                ? (string) $deal->primary_contact_id
+                : null,
             pipeline_id: (string) $deal->pipeline_id,
             pipeline_name: $pipeline?->name,
             stage_id: (string) $deal->stage_id,

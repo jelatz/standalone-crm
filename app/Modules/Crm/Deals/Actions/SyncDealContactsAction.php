@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Deals\Actions;
 
 use App\Modules\Core\Users\Models\User;
+use App\Modules\Crm\Contacts\Models\Contact;
 use App\Modules\Crm\Deals\Data\DealStakeholderData;
 use App\Modules\Crm\Deals\Data\DealStakeholderInputData;
 use App\Modules\Crm\Deals\Data\SyncDealContactsData;
@@ -43,7 +44,36 @@ class SyncDealContactsAction
                 ];
             }
 
-            $lockedDeal->contacts()->sync($syncPayload);
+            $existingPivotContactIds = DB::table('deal_contacts')
+                ->where('deal_id', $lockedDeal->id)
+                ->pluck('contact_id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->all();
+
+            $canViewContacts = Gate::forUser($actor)->allows('viewAny', Contact::class);
+
+            /** @var list<string> $visibleExistingContactIds */
+            $visibleExistingContactIds = ($existingPivotContactIds !== [] && $canViewContacts)
+                ? Contact::query()
+                    ->visibleTo($actor)
+                    ->whereIn('id', $existingPivotContactIds)
+                    ->pluck('id')
+                    ->map(static fn (mixed $id): string => (string) $id)
+                    ->all()
+                : [];
+
+            $visibleIdsToDetach = array_values(array_diff($visibleExistingContactIds, array_keys($syncPayload)));
+            if ($visibleIdsToDetach !== []) {
+                $lockedDeal->contacts()->detach($visibleIdsToDetach);
+            }
+
+            if ($syncPayload !== []) {
+                $lockedDeal->contacts()->syncWithoutDetaching($syncPayload);
+            }
+
+            if (! $canViewContacts) {
+                return [];
+            }
 
             return $lockedDeal->contacts()
                 ->visibleTo($actor)

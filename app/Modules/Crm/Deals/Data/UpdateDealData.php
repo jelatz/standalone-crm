@@ -14,7 +14,7 @@ class UpdateDealData extends Data
      */
     public function __construct(
         public int $expected_version,
-        public string|Optional $company_id = new Optional,
+        public string|Optional|null $company_id = new Optional,
         public string|Optional|null $primary_contact_id = new Optional,
         public string|Optional $stage_id = new Optional,
         public string|Optional|null $account_manager_id = new Optional,
@@ -34,7 +34,7 @@ class UpdateDealData extends Data
     {
         return [
             'expected_version' => ['required', 'integer', 'min:1'],
-            'company_id' => ['sometimes', 'uuid'],
+            'company_id' => ['sometimes', 'nullable', 'uuid'],
             'primary_contact_id' => ['sometimes', 'nullable', 'uuid'],
             'stage_id' => ['sometimes', 'uuid'],
             'account_manager_id' => ['sometimes', 'nullable', 'uuid'],

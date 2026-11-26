@@ -179,6 +179,7 @@ is_primary_contact: boolean,
 custom_fields: Record<string, any>,
 created_at: string,
 updated_at: string,
+has_masked_company: boolean,
 };
 export type ContactFilterData = {
 search: string | null,
@@ -328,6 +329,8 @@ version: number,
 custom_fields: Record<string, any>,
 created_at: string,
 updated_at: string,
+has_masked_company: boolean,
+has_masked_primary_contact: boolean,
 };
 export type DealFilterData = {
 view: string | null,
@@ -376,7 +379,7 @@ override_gates: boolean,
 };
 export type RelatedDealData = {
 id: string,
-company_id: string,
+company_id: string | null,
 primary_contact_id: string | null,
 pipeline_id: string,
 pipeline_name: string | null,
@@ -400,7 +403,7 @@ contacts: App.Modules.Crm.Deals.Data.DealStakeholderInputData[],
 };
 export type UpdateDealData = {
 expected_version: number,
-company_id: undefined | string,
+company_id: undefined | string | null,
 primary_contact_id: undefined | string | null,
 stage_id: undefined | string,
 account_manager_id: undefined | string | null,

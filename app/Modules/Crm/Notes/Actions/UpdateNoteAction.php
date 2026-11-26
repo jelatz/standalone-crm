@@ -23,19 +23,24 @@ class UpdateNoteAction
         $sanitized = $this->sanitizer->execute($data->body_json, requireNonEmpty: true);
 
         return DB::transaction(function () use ($note, $sanitized): Note {
-            $note->update([
+            $lockedNote = Note::query()
+                ->whereKey($note->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedNote->update([
                 'body_json' => $sanitized['body_json'],
                 'body_text' => $sanitized['body_text'],
             ]);
 
             Activity::query()
-                ->where('source_type', $note->getMorphClass())
-                ->where('source_id', (string) $note->id)
+                ->where('source_type', $lockedNote->getMorphClass())
+                ->where('source_id', (string) $lockedNote->id)
                 ->update([
                     'summary' => Str::limit($sanitized['body_text'], 255, ''),
                 ]);
 
-            return $note->refresh()->load('author');
+            return $lockedNote->refresh()->load('author');
         });
     }
 }

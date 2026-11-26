@@ -825,3 +825,202 @@ it('denies override_gates for Sales in UpdateDealAction even when stage_id is un
         ->and($forUpdateQueries[1]['sql'])->toContain('"deals"')
         ->and($forUpdateQueries[1]['bindings'])->toContain((string) $deal->id);
 });
+
+it('sets DealDetailData has_masked flags, protects masked associations in UpdateDealAction/MoveDealStageAction, and preserves out-of-silo deal_contacts in SyncDealContactsAction', function (): void {
+    $dept = Department::query()->create(['name' => 'Revenue', 'slug' => 't14-masked-deals']);
+    $repA = createTask14User($dept, 'EMP-MD-A', 'rep.a.md@acme.internal', RoleEnum::Sales);
+    $repB = createTask14User($dept, 'EMP-MD-B', 'rep.b.md@acme.internal', RoleEnum::Sales);
+
+    $pipeline = Pipeline::query()->where('slug', 'new-business')->firstOrFail();
+    $stages = $pipeline->stages()->orderBy('sort_order')->get()->keyBy('name');
+    $qualStage = $stages['Qualification'];
+    $discStage = $stages['Discovery'];
+
+    $companyA = Company::query()->create(['name' => 'Hidden Co A', 'owner_id' => $repA->id]);
+    $companyB = Company::query()->create(['name' => 'Visible Co B', 'owner_id' => $repB->id]);
+
+    $contactA = Contact::query()->create([
+        'company_id' => $companyA->id,
+        'owner_id' => $repA->id,
+        'first_name' => 'Hidden',
+        'last_name' => 'Stakeholder',
+    ]);
+    $contactB = Contact::query()->create([
+        'company_id' => $companyB->id,
+        'owner_id' => $repB->id,
+        'first_name' => 'Visible',
+        'last_name' => 'Stakeholder',
+    ]);
+    $contactB2 = Contact::query()->create([
+        'company_id' => $companyB->id,
+        'owner_id' => $repB->id,
+        'first_name' => 'Second',
+        'last_name' => 'Visible',
+    ]);
+
+    $dealA = Deal::query()->create([
+        'company_id' => $companyA->id,
+        'primary_contact_id' => $contactA->id,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $qualStage->id,
+        'owner_id' => $repA->id,
+        'title' => 'Masked Deal A',
+        'amount_cents' => 100000,
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+    $dealA->contacts()->sync([
+        $contactA->id => ['stakeholder_role' => DealStakeholderRoleEnum::DecisionMaker->value],
+        $contactB->id => ['stakeholder_role' => DealStakeholderRoleEnum::Champion->value],
+    ]);
+
+    $dealWithoutContact = Deal::query()->create([
+        'company_id' => $companyA->id,
+        'primary_contact_id' => null,
+        'pipeline_id' => $pipeline->id,
+        'stage_id' => $qualStage->id,
+        'owner_id' => $repA->id,
+        'title' => 'No Primary Contact Deal',
+        'stage_entered_at' => now(),
+        'version' => 1,
+    ]);
+
+    // Share both deals with Rep B as Editor WITHOUT sharing Company A or Contact A
+    $this->actingAs($repA)->postJson("/api/internal/crm/deals/{$dealA->id}/collaborators", [
+        'user_id' => $repB->id,
+        'access_level' => CollaboratorAccessLevel::Editor->value,
+        'role_label' => CollaboratorRoleLabel::SalesOverlay->value,
+    ])->assertCreated();
+    $this->actingAs($repA)->postJson("/api/internal/crm/deals/{$dealWithoutContact->id}/collaborators", [
+        'user_id' => $repB->id,
+        'access_level' => CollaboratorAccessLevel::Editor->value,
+        'role_label' => CollaboratorRoleLabel::SalesOverlay->value,
+    ])->assertCreated();
+
+    // 1. DealDetailPage flags: masked company & primary contact true on dealA, primary contact false when null in DB
+    $this->actingAs($repB)->get("/app/crm/deals/{$dealA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('crm/pages/DealDetailPage')
+            ->where('deal.company_id', null)
+            ->where('deal.has_masked_company', true)
+            ->where('deal.primary_contact_id', null)
+            ->where('deal.has_masked_primary_contact', true)
+            ->has('stakeholders', 1)
+            ->where('stakeholders.0.contact_id', $contactB->id));
+
+    $this->actingAs($repB)->get("/app/crm/deals/{$dealWithoutContact->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('deal.has_masked_company', true)
+            ->where('deal.primary_contact_id', null)
+            ->where('deal.has_masked_primary_contact', false));
+
+    $this->actingAs($repA)->get("/app/crm/deals/{$dealA->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('deal.company_id', $companyA->id)
+            ->where('deal.has_masked_company', false)
+            ->where('deal.primary_contact_id', $contactA->id)
+            ->where('deal.has_masked_primary_contact', false));
+
+    // 2. Editor Rep B cannot unlink or replace masked company_id or primary_contact_id (403 Forbidden)
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'company_id' => null,
+    ])->assertForbidden();
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'company_id' => $companyB->id,
+    ])->assertForbidden();
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'company_id' => $companyA->id,
+    ])->assertForbidden();
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'primary_contact_id' => null,
+    ])->assertForbidden();
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'primary_contact_id' => $contactB->id,
+    ])->assertForbidden();
+
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}/move-stage", [
+        'target_stage_id' => $discStage->id,
+        'expected_version' => 1,
+        'core_field_updates' => ['primary_contact_id' => null],
+    ])->assertForbidden();
+
+    expect($dealA->fresh()->company_id)->toBe($companyA->id)
+        ->and($dealA->fresh()->primary_contact_id)->toBe($contactA->id)
+        ->and($dealA->fresh()->version)->toBe(1);
+
+    // Omitting company_id and primary_contact_id succeeds and preserves DB associations
+    $this->actingAs($repB)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 1,
+        'title' => 'Updated By Masked Editor',
+    ])->assertOk()
+        ->assertJsonPath('title', 'Updated By Masked Editor')
+        ->assertJsonPath('version', 2)
+        ->assertJsonPath('company_id', null)
+        ->assertJsonPath('has_masked_company', true)
+        ->assertJsonPath('primary_contact_id', null)
+        ->assertJsonPath('has_masked_primary_contact', true);
+
+    expect($dealA->fresh()->company_id)->toBe($companyA->id)
+        ->and($dealA->fresh()->primary_contact_id)->toBe($contactA->id);
+
+    // 3. SyncDealContactsAction preserves out-of-silo Contact A pivot row while syncing visible contacts
+    $this->actingAs($repB)->putJson("/api/internal/crm/deals/{$dealA->id}/contacts", [
+        'contacts' => [
+            ['contact_id' => $contactB2->id, 'stakeholder_role' => DealStakeholderRoleEnum::TechnicalBuyer->value],
+        ],
+    ])->assertOk()
+        ->assertJsonCount(1, 'contacts')
+        ->assertJsonPath('contacts.0.contact_id', $contactB2->id)
+        ->assertJsonPath('contacts.0.stakeholder_role', 'technical_buyer');
+
+    $pivotRows = DB::table('deal_contacts')
+        ->where('deal_id', $dealA->id)
+        ->pluck('stakeholder_role', 'contact_id')
+        ->all();
+
+    expect($pivotRows)->toHaveKey($contactA->id, DealStakeholderRoleEnum::DecisionMaker->value)
+        ->and($pivotRows)->toHaveKey($contactB2->id, DealStakeholderRoleEnum::TechnicalBuyer->value)
+        ->and($pivotRows)->not->toHaveKey($contactB->id);
+
+    // Updating existing visible contact's role + clearing visible contacts still preserves Contact A
+    $this->actingAs($repB)->putJson("/api/internal/crm/deals/{$dealA->id}/contacts", [
+        'contacts' => [
+            ['contact_id' => $contactB2->id, 'stakeholder_role' => DealStakeholderRoleEnum::Influencer->value],
+        ],
+    ])->assertOk()
+        ->assertJsonPath('contacts.0.stakeholder_role', 'influencer');
+
+    $this->actingAs($repB)->putJson("/api/internal/crm/deals/{$dealA->id}/contacts", [
+        'contacts' => [],
+    ])->assertOk()
+        ->assertJsonCount(0, 'contacts');
+
+    expect(DB::table('deal_contacts')->where('deal_id', $dealA->id)->pluck('contact_id')->all())
+        ->toBe([$contactA->id]);
+
+    // 4. Rep A (can view Company A & Contact A) gets 422 if clearing company_id (NOT NULL) and 200 if clearing primary_contact_id
+    $this->actingAs($repA)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 2,
+        'company_id' => null,
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['company_id']);
+
+    $this->actingAs($repA)->patchJson("/api/internal/crm/deals/{$dealA->id}", [
+        'expected_version' => 2,
+        'primary_contact_id' => null,
+    ])->assertOk()
+        ->assertJsonPath('primary_contact_id', null)
+        ->assertJsonPath('has_masked_primary_contact', false);
+});

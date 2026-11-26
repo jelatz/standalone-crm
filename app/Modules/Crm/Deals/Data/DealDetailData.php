@@ -44,6 +44,8 @@ class DealDetailData extends Data
         public array $custom_fields,
         public string $created_at,
         public string $updated_at,
+        public bool $has_masked_company = false,
+        public bool $has_masked_primary_contact = false,
     ) {}
 
     public static function fromModel(
@@ -51,6 +53,8 @@ class DealDetailData extends Data
         bool $canViewCompany = true,
         bool $canViewPrimaryContact = true,
     ): self {
+        $hasMaskedCompany = $deal->company_id !== null && ! $canViewCompany;
+        $hasMaskedPrimaryContact = $deal->primary_contact_id !== null && ! $canViewPrimaryContact;
         $company = $canViewCompany && $deal->relationLoaded('company') ? $deal->company : null;
         $primaryContact = $canViewPrimaryContact && $deal->relationLoaded('primaryContact') ? $deal->primaryContact : null;
         $pipeline = $deal->relationLoaded('pipeline') ? $deal->pipeline : null;
@@ -93,6 +97,8 @@ class DealDetailData extends Data
             custom_fields: $deal->custom_fields ?? [],
             created_at: $deal->created_at?->toIso8601String() ?? now()->toIso8601String(),
             updated_at: $deal->updated_at?->toIso8601String() ?? now()->toIso8601String(),
+            has_masked_company: $hasMaskedCompany,
+            has_masked_primary_contact: $hasMaskedPrimaryContact,
         );
     }
 }

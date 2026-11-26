@@ -43,10 +43,6 @@ class UpsertContactAction
             ? trim($data->company_id)
             : null;
 
-        if ($targetCompanyId !== null) {
-            $this->assertCompanyVisible($actor, $targetCompanyId);
-        }
-
         $firstName = ! $data->first_name instanceof Optional ? trim($data->first_name) : '';
         $lastName = ! $data->last_name instanceof Optional ? trim($data->last_name) : '';
 
@@ -94,6 +90,10 @@ class UpsertContactAction
             $customFields,
             $normalizedEmails,
         ): Contact {
+            if ($targetCompanyId !== null) {
+                $this->assertCompanyVisible($actor, $targetCompanyId);
+            }
+
             $created = Contact::query()->create([
                 'company_id' => $targetCompanyId,
                 'owner_id' => $actor->id,
@@ -146,7 +146,17 @@ class UpsertContactAction
                     ? trim($data->company_id)
                     : null;
 
-                if ($targetCompanyId !== null && $targetCompanyId !== $lockedContact->company_id) {
+                if (
+                    $lockedContact->company_id !== null
+                    && $targetCompanyId !== (string) $lockedContact->company_id
+                ) {
+                    $existingCompany = Company::query()->find($lockedContact->company_id);
+                    if ($existingCompany === null || ! Gate::forUser($actor)->allows('view', $existingCompany)) {
+                        throw new AuthorizationException('You are not authorized to unlink or replace an inaccessible company on this contact.');
+                    }
+                }
+
+                if ($targetCompanyId !== null) {
                     $this->assertCompanyVisible($actor, $targetCompanyId);
                 }
             } else {
@@ -265,10 +275,11 @@ class UpsertContactAction
 
     protected function assertCompanyVisible(User $actor, string $companyId): void
     {
-        $companyVisible = Company::query()
-            ->visibleTo($actor)
-            ->whereKey($companyId)
-            ->exists();
+        $companyVisible = Gate::forUser($actor)->allows('viewAny', Company::class)
+            && Company::query()
+                ->visibleTo($actor)
+                ->whereKey($companyId)
+                ->exists();
 
         if (! $companyVisible) {
             throw new AuthorizationException('You are not authorized to link a contact to the selected company.');

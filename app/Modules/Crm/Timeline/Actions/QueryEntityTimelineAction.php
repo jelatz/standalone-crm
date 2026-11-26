@@ -32,6 +32,8 @@ class QueryEntityTimelineAction
         'deal',
     ];
 
+    public const int MAX_SCAN_BATCHES = 20;
+
     public function execute(
         User $viewer,
         string $linkableType,
@@ -68,11 +70,16 @@ class QueryEntityTimelineAction
 
         $batchSize = max($clampedLimit * 2, 50);
         $isAdmin = $viewer->hasRole(RoleEnum::Admin->value);
+        $canViewDeals = Gate::forUser($viewer)->allows('viewAny', Deal::class);
+        $canViewContacts = Gate::forUser($viewer)->allows('viewAny', Contact::class);
+        $canViewCompanies = Gate::forUser($viewer)->allows('viewAny', Company::class);
+        $batchesScanned = 0;
 
         /** @var list<array{data: ActivityData, occurred_at: CarbonInterface, activity_id: string}> $visibleEntries */
         $visibleEntries = [];
 
-        while (count($visibleEntries) <= $clampedLimit) {
+        while (count($visibleEntries) <= $clampedLimit && $batchesScanned < self::MAX_SCAN_BATCHES) {
+            $batchesScanned++;
             $query = ActivityLink::query()
                 ->with('activity.actor')
                 ->where('linkable_type', $linkableType)
@@ -124,15 +131,15 @@ class QueryEntityTimelineAction
                 };
             }
 
-            $visibleDealIds = $dealIds !== []
+            $visibleDealIds = ($canViewDeals && $dealIds !== [])
                 ? Deal::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($dealIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
                 : [];
 
-            $visibleContactIds = $contactIds !== []
+            $visibleContactIds = ($canViewContacts && $contactIds !== [])
                 ? Contact::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($contactIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
                 : [];
 
-            $visibleCompanyIds = $companyIds !== []
+            $visibleCompanyIds = ($canViewCompanies && $companyIds !== [])
                 ? Company::query()->visibleTo($viewer)->whereIn('id', array_values(array_unique($companyIds)))->pluck('id')->map(static fn (mixed $id): string => (string) $id)->flip()->all()
                 : [];
 
@@ -242,9 +249,24 @@ class QueryEntityTimelineAction
             ]);
         }
 
-        try {
-            $timestamp = CarbonImmutable::parse($payload['occurred_at']);
-        } catch (Throwable) {
+        $timestamp = null;
+        foreach (['!Y-m-d\TH:i:s.uP', '!Y-m-d\TH:i:s.u+00', '!'.CarbonInterface::ATOM] as $format) {
+            try {
+                $parsed = CarbonImmutable::createFromFormat($format, $payload['occurred_at'], 'UTC');
+                $lastErrors = CarbonImmutable::getLastErrors();
+                if (
+                    $parsed instanceof CarbonImmutable
+                    && ($lastErrors === false || ($lastErrors['warning_count'] === 0 && $lastErrors['error_count'] === 0))
+                ) {
+                    $timestamp = $parsed->utc();
+                    break;
+                }
+            } catch (Throwable) {
+                // Try next strict ISO-8601 format.
+            }
+        }
+
+        if (! $timestamp instanceof CarbonImmutable) {
             throw ValidationException::withMessages([
                 'cursor' => ['The timeline cursor timestamp is invalid.'],
             ]);

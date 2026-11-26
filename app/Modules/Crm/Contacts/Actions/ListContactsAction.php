@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 
 class ListContactsAction
 {
@@ -89,7 +90,16 @@ class ListContactsAction
         }
 
         if ($filter->company_id !== null && trim($filter->company_id) !== '') {
-            $query->where('contacts.company_id', $filter->company_id);
+            $companyId = trim($filter->company_id);
+            $canFilterCompany = Str::isUuid($companyId)
+                && Gate::forUser($viewer)->allows('viewAny', Company::class)
+                && Company::query()->visibleTo($viewer)->whereKey($companyId)->exists();
+
+            if (! $canFilterCompany) {
+                $query->whereRaw('0 = 1');
+            } else {
+                $query->where('contacts.company_id', $companyId);
+            }
         }
 
         if ($filter->owner_id !== null && trim($filter->owner_id) !== '') {

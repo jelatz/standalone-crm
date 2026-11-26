@@ -20,9 +20,11 @@ Route::middleware(['auth', 'active.employee'])->group(function (): void {
 
     Route::patch('/api/internal/crm/pipelines/{pipeline}/stages/{stage}', [PipelineController::class, 'updateStage'])
         ->whereUuid(['pipeline', 'stage'])
+        ->scopeBindings()
         ->name('crm.pipelines.stages.update');
 
     Route::delete('/api/internal/crm/pipelines/{pipeline}/stages/{stage}', [PipelineController::class, 'destroyStage'])
         ->whereUuid(['pipeline', 'stage'])
+        ->scopeBindings()
         ->name('crm.pipelines.stages.destroy');
 });

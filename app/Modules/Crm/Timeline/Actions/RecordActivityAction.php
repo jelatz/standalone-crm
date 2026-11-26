@@ -64,7 +64,7 @@ class RecordActivityAction
             ]);
 
             if ($normalizedTargets !== []) {
-                $formattedTimestamp = $timestamp->format('Y-m-d H:i:s');
+                $formattedTimestamp = $timestamp->utc()->format('Y-m-d H:i:s.u+00');
                 $rows = array_map(static fn (array $target): array => [
                     'linkable_type' => $target['linkable_type'],
                     'linkable_id' => $target['linkable_id'],

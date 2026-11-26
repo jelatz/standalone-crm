@@ -14,14 +14,19 @@ class TogglePinNoteAction
     {
         Gate::forUser($actor)->authorize('update', $note);
 
-        $nextPinned = $pinned ?? ! $note->is_pinned;
+        return DB::transaction(function () use ($note, $pinned): Note {
+            $lockedNote = Note::query()
+                ->whereKey($note->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return DB::transaction(function () use ($note, $nextPinned): Note {
-            $note->update(['is_pinned' => $nextPinned]);
+            $nextPinned = $pinned ?? ! $lockedNote->is_pinned;
+
+            $lockedNote->update(['is_pinned' => $nextPinned]);
 
             Activity::query()
-                ->where('source_type', $note->getMorphClass())
-                ->where('source_id', (string) $note->id)
+                ->where('source_type', $lockedNote->getMorphClass())
+                ->where('source_id', (string) $lockedNote->id)
                 ->get()
                 ->each(static function (Activity $activity) use ($nextPinned): void {
                     $metadata = $activity->metadata ?? [];
@@ -29,7 +34,7 @@ class TogglePinNoteAction
                     $activity->update(['metadata' => $metadata]);
                 });
 
-            return $note->refresh()->load('author');
+            return $lockedNote->refresh()->load('author');
         });
     }
 }
