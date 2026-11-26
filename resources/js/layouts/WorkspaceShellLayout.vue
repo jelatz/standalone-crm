@@ -18,6 +18,7 @@ import {
     Moon,
     Plus,
     Search,
+    SlidersHorizontal,
     Sun,
     Trash2,
     UserCog,
@@ -56,7 +57,19 @@ interface NavGroup {
     items: NavItem[];
 }
 
-const navGroups: NavGroup[] = [
+const page = usePage<WorkspacePageProps>();
+const authStore = useAuthStore();
+const realtimeStore = useRealtimeStore();
+const unreadsStore = useUnreadsStore();
+const draftsStore = useDraftsStore();
+
+const canManageCrmSettings = computed(
+    () =>
+        authStore.hasPermission('pipelines.manage') ||
+        authStore.hasPermission('custom_fields.manage'),
+);
+
+const navGroups = computed<NavGroup[]>(() => [
     {
         label: 'Core',
         items: [
@@ -93,6 +106,17 @@ const navGroups: NavGroup[] = [
                 icon: Kanban,
                 keywords: 'pipeline opportunities kanban deals revenue',
             },
+            ...(canManageCrmSettings.value
+                ? [
+                      {
+                          key: 'crm.settings.pipelines',
+                          label: 'CRM Settings',
+                          href: '/app/crm/settings/pipelines',
+                          icon: SlidersHorizontal,
+                          keywords: 'pipelines stages gates custom fields settings crm',
+                      },
+                  ]
+                : []),
         ],
     },
     {
@@ -139,18 +163,12 @@ const navGroups: NavGroup[] = [
             },
         ],
     },
-];
-
-const page = usePage<WorkspacePageProps>();
-const authStore = useAuthStore();
-const realtimeStore = useRealtimeStore();
-const unreadsStore = useUnreadsStore();
-const draftsStore = useDraftsStore();
+]);
 
 const visibleNavGroups = computed<NavGroup[]>(() => {
     if (authStore.hasRole('superadmin') && authStore.hasPermission('admin.users')) {
         return [
-            ...navGroups,
+            ...navGroups.value,
             {
                 label: 'Admin',
                 items: [
@@ -166,7 +184,7 @@ const visibleNavGroups = computed<NavGroup[]>(() => {
         ];
     }
 
-    return navGroups;
+    return navGroups.value;
 });
 
 const allNavItems = computed(() => visibleNavGroups.value.flatMap((group) => group.items));
