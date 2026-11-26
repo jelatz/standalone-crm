@@ -8,13 +8,6 @@ Route::middleware(['auth', 'active.employee'])->prefix('app')->group(function ()
     Route::inertia('/', 'core/pages/WorkspaceHomePage')
         ->name('app.home');
 
-    Route::inertia('/projects', 'core/pages/ModulePlaceholderPage', [
-        'moduleKey' => 'projects.index',
-        'moduleTitle' => 'Projects & Tasks',
-        'moduleDescription' => 'Templated delivery boards, task lists, and My Work assignments (Phase 2).',
-        'phaseLabel' => 'Phase 2',
-    ])->name('projects.index');
-
     Route::inertia('/chat', 'core/pages/ModulePlaceholderPage', [
         'moduleKey' => 'chat.index',
         'moduleTitle' => 'Team Chat',

@@ -617,6 +617,147 @@ export type DealHandoffStatusEnum = 'pending_review' | 'changes_requested' | 'ap
 }
 }
 namespace Projects {
+namespace Data {
+export type CreateProjectData = {
+name: string,
+company_id: string | null,
+primary_deal_id: string | null,
+owner_id: string | null,
+account_manager_id: string | null,
+department_id: string | null,
+description_json: Record<string, any> | null,
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
+start_date: string | null,
+target_end_date: string | null,
+custom_fields: Record<string, any>,
+stages: App.Modules.Projects.Projects.Data.ProjectStageInputData[] | null,
+};
+export type ManageProjectStagesData = {
+stages: App.Modules.Projects.Projects.Data.ProjectStageInputData[],
+};
+export type ProjectDetailData = {
+id: string,
+code: string,
+company_id: string | null,
+company_name: string | null,
+company_domain: string | null,
+primary_deal_id: string | null,
+primary_deal_title: string | null,
+deal_handoff_id: string | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+department_id: string,
+department_name: string | null,
+name: string,
+description_json: Record<string, any> | null,
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
+start_date: string | null,
+target_end_date: string | null,
+completed_at: string | null,
+custom_fields: Record<string, any>,
+has_masked_company: boolean,
+has_masked_deal: boolean,
+created_at: string,
+updated_at: string,
+};
+export type ProjectFilterData = {
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum | null,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum | null,
+owner_id: string | null,
+company_id: string | null,
+search: string | null,
+sort_by: string | null,
+sort_dir: string | null,
+page: number | null,
+per_page: number | null,
+};
+export type ProjectStageData = {
+id: string,
+project_id: string,
+name: string,
+category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum,
+sort_order: number,
+wip_limit: number | null,
+tasks_count: number,
+};
+export type ProjectStageInputData = {
+name: string,
+category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum,
+id: string | null,
+wip_limit: number | null,
+sort_order: number | null,
+};
+export type ProjectSummaryData = {
+id: string,
+code: string,
+company_id: string | null,
+company_name: string | null,
+primary_deal_id: string | null,
+primary_deal_title: string | null,
+deal_handoff_id: string | null,
+owner_id: string,
+owner_name: string | null,
+account_manager_id: string | null,
+account_manager_name: string | null,
+department_id: string,
+department_name: string | null,
+name: string,
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum,
+start_date: string | null,
+target_end_date: string | null,
+completed_at: string | null,
+tasks_count: number,
+completed_tasks_count: number,
+has_masked_company: boolean,
+has_masked_deal: boolean,
+created_at: string,
+updated_at: string,
+};
+export type ProjectWorkspaceData = {
+project: App.Modules.Projects.Projects.Data.ProjectDetailData,
+stages: App.Modules.Projects.Projects.Data.ProjectStageData[],
+columns: App.Modules.Projects.Tasks.Data.TaskStageColumnData[],
+tasks: App.Modules.Projects.Tasks.Data.TaskData[],
+collaborators: App.Modules.Core.Rbac.Data.EntityCollaboratorData[],
+attachments: App.Modules.Core.Attachments.Data.AttachmentSummaryData[],
+customFieldDefinitions: App.Modules.Crm.CustomFields.Data.CustomFieldDefinitionData[],
+timeline: App.Modules.Crm.Timeline.Data.TimelinePageData,
+assignableUsers: App.Modules.Core.Users.Data.UserSummaryData[],
+collaboratorAccessLevels: string[],
+collaboratorRoleLabels: string[],
+statuses: string[],
+healthOptions: string[],
+stageCategories: string[],
+taskPriorities: string[],
+taskStatuses: string[],
+can: {
+update: boolean,
+delete: boolean,
+manageStages: boolean,
+manageCollaborators: boolean,
+createTask: boolean,
+},
+};
+export type UpdateProjectData = {
+name: undefined | string,
+company_id: undefined | string | null,
+primary_deal_id: undefined | string | null,
+owner_id: undefined | string,
+account_manager_id: undefined | string | null,
+department_id: undefined | string,
+description_json: Record<string, any> | undefined | null,
+status: App.Modules.Projects.Projects.Enums.ProjectStatusEnum | undefined,
+health: App.Modules.Projects.Projects.Enums.ProjectHealthEnum | undefined,
+start_date: undefined | string | null,
+target_end_date: undefined | string | null,
+custom_fields: Record<string, any> | undefined,
+};
+}
 namespace Enums {
 export type ProjectHealthEnum = 'on_track' | 'at_risk' | 'off_track';
 export type ProjectStageCategoryEnum = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
@@ -624,6 +765,85 @@ export type ProjectStatusEnum = 'planning' | 'active' | 'on_hold' | 'completed' 
 }
 }
 namespace Tasks {
+namespace Data {
+export type CreateTaskData = {
+title: string,
+project_id: string | null,
+project_stage_id: string | null,
+parent_task_id: string | null,
+linkable_type: string | null,
+linkable_id: string | null,
+assignee_id: string | null,
+description_json: Record<string, any> | null,
+priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum,
+status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum | null,
+due_at: string | null,
+estimated_minutes: number | null,
+};
+export type MoveTaskData = {
+target_stage_id: string,
+expected_version: number,
+before_task_id: string | null,
+after_task_id: string | null,
+};
+export type MyWorkGroupData = {
+key: string,
+label: string,
+tasks_count: number,
+tasks: App.Modules.Projects.Tasks.Data.TaskData[],
+};
+export type TaskData = {
+id: string,
+project_id: string | null,
+project_code: string | null,
+project_name: string | null,
+project_stage_id: string | null,
+project_stage_name: string | null,
+project_stage_category: App.Modules.Projects.Projects.Enums.ProjectStageCategoryEnum | null,
+parent_task_id: string | null,
+linkable_type: string | null,
+linkable_id: string | null,
+creator_id: string,
+creator_name: string | null,
+assignee_id: string | null,
+assignee_name: string | null,
+title: string,
+description_json: Record<string, any> | null,
+priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum,
+status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum,
+board_position: number,
+due_at: string | null,
+completed_at: string | null,
+estimated_minutes: number | null,
+version: number,
+subtasks_count: number,
+watchers_count: number,
+watcher_ids: string[],
+is_watching: boolean,
+has_masked_linkable: boolean,
+created_at: string,
+updated_at: string,
+};
+export type TaskStageColumnData = {
+stage: App.Modules.Projects.Projects.Data.ProjectStageData,
+tasks_count: number,
+tasks: App.Modules.Projects.Tasks.Data.TaskData[],
+};
+export type ToggleTaskWatcherData = {
+user_id: string | null,
+watching: boolean | null,
+};
+export type UpdateTaskData = {
+expected_version: number,
+title: undefined | string,
+description_json: Record<string, any> | undefined | null,
+assignee_id: undefined | string | null,
+priority: App.Modules.Projects.Tasks.Enums.TaskPriorityEnum | undefined,
+status: App.Modules.Projects.Tasks.Enums.TaskStatusEnum | undefined,
+due_at: undefined | string | null,
+estimated_minutes: undefined | number | null,
+};
+}
 namespace Enums {
 export type TaskPriorityEnum = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatusEnum = 'todo' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled';
